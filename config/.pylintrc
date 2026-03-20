@@ -1,0 +1,19 @@
+[MASTER]
+fail-under=9.0
+
+[MESSAGES CONTROL]
+disable=
+    too-few-public-methods,
+    missing-module-docstring,
+    missing-class-docstring,
+    import-error,
+    no-member
+
+[FORMAT]
+max-line-length=99
+
+[BASIC]
+good-names=db,id,e
+
+[DESIGN]
+max-args=7

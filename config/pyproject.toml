@@ -1,0 +1,38 @@
+[tool.isort]
+profile = "black"
+line_length = 99
+known_third_party = [
+    "fastapi",
+    "sqlalchemy",
+    "pydantic",
+    "jose",
+    "passlib",
+    "decouple",
+    "uvicorn",
+]
+known_first_party = ["backend"]
+
+[tool.pylint.master]
+load-plugins = []
+ignore = ["__pycache__", ".git", ".venv", "venv"]
+
+[tool.pylint.messages_control]
+disable = [
+    "too-few-public-methods",
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "import-error",
+]
+
+[tool.pylint.format]
+max-line-length = 99
+
+[tool.pylint.basic]
+good-names = ["db", "id", "e"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["venv", ".venv", "__pycache__"]
