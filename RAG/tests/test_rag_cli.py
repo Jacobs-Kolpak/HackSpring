@@ -130,6 +130,26 @@ class TestMindmapArgs(unittest.TestCase):
         self.assertEqual(args.inputs, ["/tmp/file.pdf"])
         self.assertEqual(args.output, "mindmap/output/out.html")
 
+    def test_flash_accepts_output_and_counts(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "flash",
+                "--collection",
+                "docs",
+                "--cards-count",
+                "10",
+                "--tests-count",
+                "6",
+                "--output",
+                "flash/output/pack.json",
+            ]
+        )
+        self.assertEqual(args.command, "flash")
+        self.assertEqual(args.cards_count, 10)
+        self.assertEqual(args.tests_count, 6)
+        self.assertEqual(args.output, "flash/output/pack.json")
+
 
 if __name__ == "__main__":
     unittest.main()

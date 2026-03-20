@@ -118,6 +118,37 @@ python src/rag_cli.py mindmap \
   --graph-json mindmap/output/uploaded_file_map.json
 ```
 
+## 4.2) Flash-карточки и тесты (самопроверка)
+
+Генерация карточек и тестов из уже загруженных в Qdrant документов:
+
+```bash
+python src/rag_cli.py flash \
+  --collection docs_ci \
+  --db-path data/qdrant \
+  --source-name "candidate_resume.pdf" \
+  --llm-url "https://hackai.centrinvest.ru:6630" \
+  --api-key "$HACKAI_API_KEY" \
+  --cards-count 12 \
+  --tests-count 8 \
+  --output flash/output/candidate_flash.json \
+  --json
+```
+
+Фокус на теме с retrieval (по query):
+
+```bash
+python src/rag_cli.py flash \
+  --query "Ключевые навыки кандидата" \
+  --collection docs_ci \
+  --db-path data/qdrant \
+  --embedder-url "https://hackai.centrinvest.ru:6620" \
+  --llm-url "https://hackai.centrinvest.ru:6630" \
+  --api-key "$HACKAI_API_KEY" \
+  --cards-count 10 \
+  --tests-count 6
+```
+
 ## 5) Использование hackai.centrinvest.ru
 
 Если у тебя есть ключ доступа:

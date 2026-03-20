@@ -1,0 +1,149 @@
+{
+  "topic": "Самые важные вопросы по этой теме ",
+  "collection": "docs_ci",
+  "used_chunks": 8,
+  "metadata_filter": {},
+  "source_name": "math84.pdf",
+  "flashcards_count": 12,
+  "tests_count": 8,
+  "flashcards": [
+    {
+      "question": "Что такое векторная база данных?",
+      "answer": "База, где хранятся embeddings и выполняется поиск ближайших соседей по метрике similarity."
+    },
+    {
+      "question": "Чем векторная БД отличается от обычной БД?",
+      "answer": "Векторная хранит embeddings и использует similarity metrics, а не таблицы с ключ-значением."
+    },
+    {
+      "question": "Какие типичные use cases для векторных БД?",
+      "answer": "Semantic search, RAG, recommendation, document similarity и др."
+    },
+    {
+      "question": "Что такое вектор?",
+      "answer": "Набор чисел, представляющих объект в многомерном пространстве."
+    },
+    {
+      "question": "Что такое размерность вектора?",
+      "answer": "Количество компонент вектора, определяющее размерность пространства."
+    },
+    {
+      "question": "Какие метрики similarity/distance обычно используются?",
+      "answer": "Cosine similarity, dot product, Euclidean distance (L2)."
+    },
+    {
+      "question": "Что такое recall@k и как рассчитывается?",
+      "answer": "Показатель, показывающий долю релевантных элементов из эталонного top-k, найденных в approximate retrieval."
+    },
+    {
+      "question": "Что такое exact search и какие его плюсы/минусы?",
+      "answer": "Сравнение query со всеми векторами, точный top-k, но дорогой по времени и ресурсам."
+    },
+    {
+      "question": "Что такое approximate nearest neighbor (ANN) и зачем он нужен?",
+      "answer": "Поиск почти лучших соседей с помощью индексов, ускоряет retrieval, основной production подход."
+    },
+    {
+      "question": "Какие индексы бывают в векторных БД?",
+      "answer": "Flat, HNSW, IVF."
+    },
+    {
+      "question": "Что такое hybrid retrieval?",
+      "answer": "Комбинация результатов из разных retrieval channels (dense, lexical, sparse) и их объединение."
+    },
+    {
+      "question": "Какие платформы можно использовать и для чего?",
+      "answer": "Qdrant – central retrieval backend; ZVEC – embedded retrieval; Elasticsearch/OpenSearch – full search stack с vector search."
+    }
+  ],
+  "tests": [
+    {
+      "question": "Какой из следующих вариантов наиболее точно описывает основную функцию векторной базы данных?",
+      "options": [
+        "Хранит таблицы с ключ-значением",
+        "Хранит embeddings и ищет ближайших соседей",
+        "Хранит только текстовые документы",
+        "Хранит только метаданные"
+      ],
+      "correct_index": 1,
+      "explanation": "Векторная БД хранит embeddings и ищет ближайших соседей по similarity metric, а не таблицы с ключ-значением."
+    },
+    {
+      "question": "Какая из следующих метрик не упоминается в контексте векторных БД?",
+      "options": [
+        "Cosine similarity",
+        "Dot product",
+        "Euclidean distance",
+        "Manhattan distance"
+      ],
+      "correct_index": 3,
+      "explanation": "Manhattan distance не упоминается в контексте; упомянуты Cosine, Dot product, Euclidean."
+    },
+    {
+      "question": "Что измеряет recall@10?",
+      "options": [
+        "Количество найденных релевантных элементов",
+        "Доля релевантных элементов из эталонного top-10",
+        "Доля найденных элементов из всех релевантных",
+        "Показатель точности"
+      ],
+      "correct_index": 1,
+      "explanation": "recall@k показывает долю релевантных элементов из эталонного top-k, найденных в approximate retrieval."
+    },
+    {
+      "question": "Какой индекс обычно требует больше памяти?",
+      "options": [
+        "Flat",
+        "HNSW",
+        "IVF",
+        "All"
+      ],
+      "correct_index": 1,
+      "explanation": "HNSW использует много связей и требует больше памяти по сравнению с Flat и IVF."
+    },
+    {
+      "question": "Для какой задачи лучше всего подходит ZVEC?",
+      "options": [
+        "Central retrieval backend",
+        "Embedded retrieval inside app",
+        "Full search stack",
+        "None"
+      ],
+      "correct_index": 1,
+      "explanation": "ZVEC предназначен для embedded retrieval внутри приложения, а не для центрального backend или full stack."
+    },
+    {
+      "question": "Какие компромиссы важны при production retrieval?",
+      "options": [
+        "Recall",
+        "Latency",
+        "Memory",
+        "All of the above"
+      ],
+      "correct_index": 3,
+      "explanation": "В production retrieval важны recall, latency, memory, indexing cost, update cost – все перечисленные компромиссы."
+    },
+    {
+      "question": "Какой тип поиска является эталоном для точного top-k?",
+      "options": [
+        "ANN",
+        "Hybrid",
+        "Lexical",
+        "Exact"
+      ],
+      "correct_index": 3,
+      "explanation": "Exact search сравнивает query со всеми векторами, даёт точный top-k, поэтому является эталоном."
+    },
+    {
+      "question": "Какой тип retrieval лучше всего справляется с перефразированием?",
+      "options": [
+        "Lexical",
+        "Dense",
+        "Hybrid",
+        "Sparse"
+      ],
+      "correct_index": 1,
+      "explanation": "Dense retrieval (embedding‑based) лучше справляется с перефразированием, так как использует семантическую близость."
+    }
+  ]
+}

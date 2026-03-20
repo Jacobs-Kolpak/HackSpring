@@ -18,6 +18,10 @@ try:
     from src.mindmap.generator import build_graph_data, render_mindmap_html
 except ModuleNotFoundError:
     from mindmap.generator import build_graph_data, render_mindmap_html
+try:
+    from src.flash.generator import build_study_context, generate_flash_materials
+except ModuleNotFoundError:
+    from flash.generator import build_study_context, generate_flash_materials
 
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
@@ -1349,6 +1353,171 @@ def cmd_mindmap(args: argparse.Namespace) -> None:
     print(f"Edges: {edges_count}")
 
 
+def collect_chunks_from_qdrant(
+    *,
+    db_path: Optional[Path],
+    qdrant_url: Optional[str],
+    qdrant_api_key: Optional[str],
+    collection_name: str,
+    source_name: Optional[str],
+    metadata: Dict[str, Any],
+    max_chunks: int,
+) -> List[dict]:
+    client = get_client(db_path=db_path, qdrant_url=qdrant_url, qdrant_api_key=qdrant_api_key)
+    query_filter = build_qdrant_filter(source_name=source_name, metadata=metadata)
+
+    all_rows: List[dict] = []
+    offset = None
+    page_limit = min(100, max(10, max_chunks))
+    while len(all_rows) < max_chunks:
+        scrolled = client.scroll(
+            collection_name=collection_name,
+            scroll_filter=query_filter,
+            limit=page_limit,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        if isinstance(scrolled, tuple):
+            points, next_offset = scrolled
+        else:
+            points = getattr(scrolled, "points", [])
+            next_offset = getattr(scrolled, "next_page_offset", None)
+
+        if not points:
+            break
+
+        for point in points:
+            payload = point.payload or {}
+            text = str(payload.get("text", "")).strip()
+            if not text:
+                continue
+            all_rows.append(
+                {
+                    "source_name": payload.get("source_name", "unknown"),
+                    "source_path": payload.get("source_path", "unknown"),
+                    "chunk_index": payload.get("chunk_index", -1),
+                    "chunk_id": payload.get("chunk_id", str(point.id)),
+                    "text": text,
+                }
+            )
+            if len(all_rows) >= max_chunks:
+                break
+
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    return all_rows[:max_chunks]
+
+
+def cmd_flash(args: argparse.Namespace) -> None:
+    metadata = parse_metadata_pairs(args.metadata)
+
+    if args.query:
+        chunks = retrieve_chunks(
+            query=args.query,
+            db_path=Path(args.db_path).resolve() if args.db_path else None,
+            qdrant_url=args.qdrant_url,
+            qdrant_api_key=args.qdrant_api_key,
+            collection_name=args.collection,
+            embedding_model=args.embedding_model,
+            embedding_cache=Path(args.embedding_cache).resolve(),
+            embedder_url=args.embedder_url,
+            embedder_api_key=args.embedder_api_key or args.api_key,
+            top_k=min(args.max_chunks, args.top_k),
+            fetch_k=max(args.fetch_k, min(args.max_chunks, args.top_k)),
+            min_score=args.min_score,
+            dense_weight=args.dense_weight,
+            source_name=args.source_name,
+            metadata=metadata,
+            opensearch_url=args.opensearch_url,
+            opensearch_index=args.opensearch_index,
+            opensearch_api_key=args.opensearch_api_key,
+            opensearch_user=args.opensearch_user,
+            opensearch_password=args.opensearch_password,
+            opensearch_insecure=args.opensearch_insecure,
+            rerank_blend=args.rerank_blend,
+            rerank_url=args.rerank_url,
+            rerank_api_key=args.rerank_api_key or args.api_key,
+            rerank_model=args.rerank_model,
+        )
+    else:
+        chunks = collect_chunks_from_qdrant(
+            db_path=Path(args.db_path).resolve() if args.db_path else None,
+            qdrant_url=args.qdrant_url,
+            qdrant_api_key=args.qdrant_api_key,
+            collection_name=args.collection,
+            source_name=args.source_name,
+            metadata=metadata,
+            max_chunks=args.max_chunks,
+        )
+
+    if not chunks:
+        raise SystemExit("No chunks found in vector database for provided filters.")
+
+    context = build_study_context(chunks=chunks, max_chars=args.max_context_chars)
+    if not context.strip():
+        raise SystemExit("Chunks are empty after preprocessing. Adjust filters/max-chunks.")
+
+    llm_api_key = resolve_api_key(args.llm_api_key or args.api_key, ["HACKAI_API_KEY", "OPENAI_API_KEY"])
+    if not llm_api_key:
+        raise SystemExit("Set --llm-api-key (or --api-key / HACKAI_API_KEY / OPENAI_API_KEY).")
+
+    topic = args.query or args.topic or "Материалы из загруженных документов"
+    flash_pack = generate_flash_materials(
+        topic=topic,
+        context=context,
+        model=args.model,
+        llm_url=args.llm_url,
+        llm_api_key=llm_api_key,
+        cards_count=args.cards_count,
+        tests_count=args.tests_count,
+        language=args.language,
+    )
+
+    output = {
+        "topic": topic,
+        "collection": args.collection,
+        "used_chunks": len(chunks),
+        "metadata_filter": metadata,
+        "source_name": args.source_name,
+        "flashcards_count": len(flash_pack.get("flashcards", [])),
+        "tests_count": len(flash_pack.get("tests", [])),
+        "flashcards": flash_pack.get("flashcards", []),
+        "tests": flash_pack.get("tests", []),
+    }
+
+    if args.output:
+        output_path = Path(args.output).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"Saved: {output_path}")
+
+    if args.json or args.output:
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
+
+    print(f"Topic: {topic}")
+    print(f"Used chunks: {len(chunks)}")
+    print(f"Flashcards: {len(output['flashcards'])}")
+    print(f"Tests: {len(output['tests'])}")
+    print("\nFlashcards:")
+    for idx, card in enumerate(output["flashcards"], start=1):
+        print(f"{idx}. Q: {card['question']}")
+        print(f"   A: {card['answer']}")
+    print("\nTests:")
+    for idx, test in enumerate(output["tests"], start=1):
+        print(f"{idx}. {test['question']}")
+        options = test.get("options", [])
+        for opt_idx, option in enumerate(options):
+            marker = "*" if opt_idx == test.get("correct_index", -1) else " "
+            print(f"   {marker} {chr(65 + opt_idx)}. {option}")
+        if test.get("explanation"):
+            print(f"   Explanation: {test['explanation']}")
+
+
 def add_shared_retrieval_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--api-key", default=None, help="Shared API key for embedder/rerank/llm")
     p.add_argument("--db-path", default="data/qdrant", help="Path to local Qdrant storage")
@@ -1435,6 +1604,25 @@ def build_parser() -> argparse.ArgumentParser:
     mindmap.add_argument("--min-concept-freq", type=int, default=2, help="Minimum term frequency for node")
     mindmap.add_argument("--min-edge-weight", type=int, default=1, help="Minimum co-occurrence count for edge")
     mindmap.set_defaults(func=cmd_mindmap)
+
+    flash = sub.add_parser(
+        "flash",
+        help="Generate flashcards and tests from vector DB documents",
+    )
+    flash.add_argument("--query", default=None, help="Optional query to focus chunk selection")
+    flash.add_argument("--topic", default=None, help="Optional human-readable topic title")
+    add_shared_retrieval_args(flash)
+    flash.add_argument("--llm-url", default=None, help="OpenAI-compatible LLM endpoint base URL")
+    flash.add_argument("--llm-api-key", default=None, help="API key for LLM endpoint")
+    flash.add_argument("--model", default="gpt-4.1-mini", help="Model for flashcards/tests generation")
+    flash.add_argument("--cards-count", type=int, default=12, help="How many flashcards to generate")
+    flash.add_argument("--tests-count", type=int, default=8, help="How many test questions to generate")
+    flash.add_argument("--max-chunks", type=int, default=80, help="Max chunks to collect from vector DB")
+    flash.add_argument("--max-context-chars", type=int, default=18000, help="Max context size sent to LLM")
+    flash.add_argument("--language", default="ru", help="Output language for cards/tests")
+    flash.add_argument("--output", default=None, help="Optional path to save JSON output")
+    flash.add_argument("--json", action="store_true", help="Print full JSON output")
+    flash.set_defaults(func=cmd_flash)
 
     return parser
 
