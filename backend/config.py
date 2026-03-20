@@ -12,7 +12,7 @@ class Settings:
     # JWT Settings
     SECRET_KEY: str = config(
         "SECRET_KEY",
-        default="your-super-secret-key-change-this-in-production",
+        default="-very-strong-and-stable-secret-key-for-development-purposes-1234567890",
     )
     ALGORITHM: str = config("ALGORITHM", default="HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = config(

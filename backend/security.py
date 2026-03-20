@@ -15,8 +15,6 @@ def hash_password(password: str) -> str:
     raw: Union[str, bytes] = password
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
-    if len(raw) > 72:
-        raw = raw[:72]
     result: str = pwd_context.hash(raw)
     return result
 
@@ -26,8 +24,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     raw: Union[str, bytes] = plain_password
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
-    if len(raw) > 72:
-        raw = raw[:72]
     result: bool = pwd_context.verify(raw, hashed_password)
     return result
 
