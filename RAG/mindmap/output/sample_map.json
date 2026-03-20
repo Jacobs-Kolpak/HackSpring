@@ -1,0 +1,45 @@
+{
+  "nodes": [
+    {
+      "id": "fastapi",
+      "label": "fastapi",
+      "title": "fastapi: 2",
+      "value": 2,
+      "relevance": 1.0
+    },
+    {
+      "id": "python",
+      "label": "python",
+      "title": "python: 2",
+      "value": 2,
+      "relevance": 1.0
+    },
+    {
+      "id": "кандидат",
+      "label": "кандидат",
+      "title": "кандидат: 2",
+      "value": 2,
+      "relevance": 0.62
+    }
+  ],
+  "edges": [
+    {
+      "from": "fastapi",
+      "to": "python",
+      "value": 2,
+      "title": "Совместные упоминания: 2"
+    },
+    {
+      "from": "fastapi",
+      "to": "кандидат",
+      "value": 1,
+      "title": "Совместные упоминания: 1"
+    },
+    {
+      "from": "python",
+      "to": "кандидат",
+      "value": 1,
+      "title": "Совместные упоминания: 1"
+    }
+  ]
+}

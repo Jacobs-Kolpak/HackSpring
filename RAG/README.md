@@ -80,6 +80,44 @@ python src/rag_cli.py ask \
   --model gpt-4.1-mini
 ```
 
+## 4.1) Mindmap (интерактивный граф понятий)
+
+Построение mindmap из retrieval-результатов:
+
+```bash
+python src/rag_cli.py mindmap \
+  --query "Ключевые навыки кандидата кратко" \
+  --top-k 8 \
+  --fetch-k 60 \
+  --dense-weight 0.6 \
+  --rerank-blend 0.35 \
+  --min-score 0.15 \
+  --db-path data/qdrant \
+  --collection docs_ci \
+  --embedder-url "https://hackai.centrinvest.ru:6620" \
+  --embedding-model "Qwen3-Embedding-0.6B" \
+  --api-key "$HACKAI_API_KEY" \
+  --output mindmap/output/candidate_skills_map.html \
+  --graph-json mindmap/output/candidate_skills_map.json
+```
+
+Построение mindmap из локального текста:
+
+```bash
+python src/rag_cli.py mindmap \
+  --text-file mindmap/sample.txt \
+  --output mindmap/output/sample_map.html
+```
+
+Построение mindmap напрямую из загруженного файла (`.pdf/.docx/.txt`):
+
+```bash
+python src/rag_cli.py mindmap \
+  --inputs "/path/to/uploaded_file.pdf" \
+  --output mindmap/output/uploaded_file_map.html \
+  --graph-json mindmap/output/uploaded_file_map.json
+```
+
 ## 5) Использование hackai.centrinvest.ru
 
 Если у тебя есть ключ доступа:

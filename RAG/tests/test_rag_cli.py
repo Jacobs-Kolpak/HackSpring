@@ -45,7 +45,7 @@ def _install_test_stubs() -> None:
 
 _install_test_stubs()
 
-from src.rag_cli import build_qdrant_filter, fuse_candidates, parse_metadata_pairs
+from src.rag_cli import build_parser, build_qdrant_filter, fuse_candidates, parse_metadata_pairs
 
 
 class TestMetadataParsing(unittest.TestCase):
@@ -112,6 +112,23 @@ class TestQdrantFilter(unittest.TestCase):
         )
         self.assertIsNotNone(filter_obj)
         self.assertEqual(len(filter_obj.must), 3)
+
+
+class TestMindmapArgs(unittest.TestCase):
+    def test_mindmap_accepts_inputs(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "mindmap",
+                "--inputs",
+                "/tmp/file.pdf",
+                "--output",
+                "mindmap/output/out.html",
+            ]
+        )
+        self.assertEqual(args.command, "mindmap")
+        self.assertEqual(args.inputs, ["/tmp/file.pdf"])
+        self.assertEqual(args.output, "mindmap/output/out.html")
 
 
 if __name__ == "__main__":
