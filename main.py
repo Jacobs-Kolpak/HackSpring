@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.auth import router as auth_router
 from backend.config import settings
 from backend.database import Base, engine
+from backend.routers.mindmap import router as mindmap_router
+from backend.routers.rag import router as rag_router
 
 # ── Логирование ─────────────────────────────────────────────
 logging.basicConfig(level=settings.LOG_LEVEL, format=settings.LOG_FORMAT)
@@ -30,7 +32,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Роутеры ──────────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api/jacobs/auth")
+app.include_router(rag_router)
+app.include_router(mindmap_router)
 
 
 @app.get("/")

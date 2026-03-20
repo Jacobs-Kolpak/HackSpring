@@ -47,11 +47,30 @@ class RAGSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="RAG_", extra="ignore")
 
-    chunk_size: int = 512
-    chunk_overlap: int = 64
-    embeddings_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # Chunking
+    chunk_size: int = 900
+    chunk_overlap: int = 180
+
+    # Embeddings
+    embeddings_model: str = "Qwen3-Embedding-0.6B"
+    embedder_url: str = ""
+    embedder_api_key: str = ""
+
+    # Vector store
     vector_store_path: str = str(BASE_DIR / "data" / "vector_store")
+    collection: str = "docs"
+
+    # Retrieval
     top_k: int = 5
+    fetch_k: int = 40
+    min_score: float = 0.20
+    dense_weight: float = 0.70
+
+    # Rerank
+    rerank_blend: float = 0.35
+    rerank_url: str = ""
+    rerank_api_key: str = ""
+    rerank_model: str = ""
 
 
 class TTSSettings(BaseSettings):
