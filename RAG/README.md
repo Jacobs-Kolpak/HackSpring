@@ -6,6 +6,8 @@
 - очистка PDF-артефактов (разбитые слова, переносы);
 - sentence-aware чанкинг;
 - retrieval из Qdrant;
+- гибридный retrieval: `Qdrant vector + OpenSearch lexical`;
+- фильтрация по метаданным (`--metadata key=value`);
 - гибридный rerank (`dense + BM25`);
 - генерация ответа через OpenAI (`ask`).
 
@@ -44,6 +46,12 @@ python src/rag_cli.py retrieve \
   --collection docs \
   --embedding-model intfloat/multilingual-e5-large \
   --embedding-cache data/embedding_cache
+
+# с фильтром по метаданным (точное совпадение)
+python src/rag_cli.py retrieve \
+  --query "Ключевые навыки кандидата" \
+  --metadata "department=risk" \
+  --metadata "lang=ru"
 ```
 
 JSON-режим:
@@ -128,6 +136,41 @@ python src/rag_cli.py ask \
   --api-key "$HACKAI_API_KEY"
 ```
 
+## OpenSearch hybrid (vector + lexical + metadata)
+
+Индексация одновременно в Qdrant и OpenSearch:
+
+```bash
+python src/rag_cli.py ingest \
+  "/path/to/docs" \
+  --db-path data/qdrant \
+  --collection docs \
+  --opensearch-url "https://localhost:9200" \
+  --opensearch-index "docs_chunks" \
+  --opensearch-user "admin" \
+  --opensearch-password "admin" \
+  --metadata "department=risk" \
+  --metadata "lang=ru"
+```
+
+Гибридный retrieval: Qdrant + OpenSearch (объединение скоринга):
+
+```bash
+python src/rag_cli.py retrieve \
+  --query "Ключевые навыки кандидата" \
+  --top-k 5 \
+  --fetch-k 40 \
+  --dense-weight 0.7 \
+  --db-path data/qdrant \
+  --collection docs \
+  --opensearch-url "https://localhost:9200" \
+  --opensearch-index "docs_chunks" \
+  --opensearch-user "admin" \
+  --opensearch-password "admin" \
+  --metadata "department=risk" \
+  --metadata "lang=ru"
+```
+
 ## Remote Qdrant (production)
 
 Вместо `--db-path` можно использовать удаленный Qdrant:
@@ -149,5 +192,7 @@ python src/rag_cli.py retrieve \
 - `--dense-weight`: вес dense-части в hybrid rerank (`0..1`)
 - `--min-score`: порог финального reranked score
 - `--source-name`: фильтр по имени файла
+- `--metadata key=value`: фильтр по метаданным (repeatable)
 - `--db-path`: локальный storage Qdrant
 - `--qdrant-url`, `--qdrant-api-key`: удаленный Qdrant
+- `--opensearch-url`, `--opensearch-index`: OpenSearch для hybrid retrieval

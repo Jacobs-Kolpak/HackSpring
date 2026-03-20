@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from docx import Document
 from pypdf import PdfReader
@@ -25,6 +25,7 @@ class Chunk:
     source_name: str
     chunk_index: int
     text: str
+    metadata: Dict[str, Any]
 
 
 def normalize_whitespace(text: str) -> str:
@@ -270,8 +271,14 @@ def make_chunk_id(path: Path, chunk_index: int, text: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
 
 
-def build_chunks(paths: List[Path], chunk_size: int, chunk_overlap: int) -> List[Chunk]:
+def build_chunks(
+    paths: List[Path],
+    chunk_size: int,
+    chunk_overlap: int,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> List[Chunk]:
     result: List[Chunk] = []
+    shared_metadata = dict(metadata or {})
 
     for path in paths:
         text = read_document(path)
@@ -287,6 +294,7 @@ def build_chunks(paths: List[Path], chunk_size: int, chunk_overlap: int) -> List
                     source_name=path.name,
                     chunk_index=idx,
                     text=piece,
+                    metadata=shared_metadata,
                 )
             )
 
@@ -313,6 +321,38 @@ def resolve_api_key(primary: Optional[str], fallback_envs: List[str]) -> Optiona
         if value:
             return value
     return None
+
+
+def normalize_base_url(url: str) -> str:
+    return url.rstrip("/")
+
+
+def parse_scalar(value: str) -> Any:
+    lowered = value.strip().lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered in {"null", "none"}:
+        return None
+    if re.fullmatch(r"-?\d+", value.strip()):
+        return int(value)
+    if re.fullmatch(r"-?\d+\.\d+", value.strip()):
+        return float(value)
+    return value
+
+
+def parse_metadata_pairs(values: Optional[List[str]]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    for raw in values or []:
+        if "=" not in raw:
+            raise SystemExit(f"Invalid --metadata value '{raw}'. Use key=value.")
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise SystemExit(f"Invalid --metadata value '{raw}'. Metadata key cannot be empty.")
+        metadata[key] = parse_scalar(value.strip())
+    return metadata
 
 
 def get_embedder(model_name: str, cache_dir: Path, embedder_url: Optional[str], embedder_api_key: Optional[str]):
@@ -416,12 +456,170 @@ def remove_existing_for_sources(client: QdrantClient, collection_name: str, sour
         )
 
 
+def opensearch_request(
+    method: str,
+    url: str,
+    opensearch_api_key: Optional[str],
+    opensearch_user: Optional[str],
+    opensearch_password: Optional[str],
+    verify_ssl: bool,
+    json_body: Optional[dict] = None,
+    content: Optional[str] = None,
+):
+    headers = {}
+    if content is not None:
+        headers["Content-Type"] = "application/x-ndjson"
+    elif json_body is not None:
+        headers["Content-Type"] = "application/json"
+    if opensearch_api_key:
+        headers["Authorization"] = f"ApiKey {opensearch_api_key}"
+    auth = None
+    if opensearch_user and opensearch_password:
+        auth = (opensearch_user, opensearch_password)
+    return httpx.request(
+        method=method,
+        url=url,
+        headers=headers,
+        auth=auth,
+        json=json_body,
+        content=content,
+        timeout=40.0,
+        verify=verify_ssl,
+    )
+
+
+def ensure_opensearch_index(
+    opensearch_url: str,
+    index_name: str,
+    opensearch_api_key: Optional[str],
+    opensearch_user: Optional[str],
+    opensearch_password: Optional[str],
+    verify_ssl: bool,
+) -> None:
+    base = normalize_base_url(opensearch_url)
+    index_url = f"{base}/{index_name}"
+    exists = opensearch_request(
+        method="HEAD",
+        url=index_url,
+        opensearch_api_key=opensearch_api_key,
+        opensearch_user=opensearch_user,
+        opensearch_password=opensearch_password,
+        verify_ssl=verify_ssl,
+    )
+    if exists.status_code == 200:
+        return
+
+    mapping = {
+        "mappings": {
+            "properties": {
+                "chunk_id": {"type": "keyword"},
+                "source_name": {"type": "keyword"},
+                "source_path": {"type": "keyword"},
+                "chunk_index": {"type": "integer"},
+                "text": {"type": "text"},
+                "metadata": {"type": "object", "dynamic": True},
+            }
+        }
+    }
+    created = opensearch_request(
+        method="PUT",
+        url=index_url,
+        opensearch_api_key=opensearch_api_key,
+        opensearch_user=opensearch_user,
+        opensearch_password=opensearch_password,
+        verify_ssl=verify_ssl,
+        json_body=mapping,
+    )
+    created.raise_for_status()
+
+
+def remove_existing_opensearch_sources(
+    opensearch_url: str,
+    index_name: str,
+    source_paths: List[str],
+    opensearch_api_key: Optional[str],
+    opensearch_user: Optional[str],
+    opensearch_password: Optional[str],
+    verify_ssl: bool,
+) -> None:
+    if not source_paths:
+        return
+    base = normalize_base_url(opensearch_url)
+    url = f"{base}/{index_name}/_delete_by_query"
+    body = {"query": {"terms": {"source_path": source_paths}}}
+    resp = opensearch_request(
+        method="POST",
+        url=url,
+        opensearch_api_key=opensearch_api_key,
+        opensearch_user=opensearch_user,
+        opensearch_password=opensearch_password,
+        verify_ssl=verify_ssl,
+        json_body=body,
+    )
+    # Ignore 404 if index is absent.
+    if resp.status_code not in {200, 404}:
+        resp.raise_for_status()
+
+
+def upsert_opensearch_chunks(
+    opensearch_url: str,
+    index_name: str,
+    chunks: List[Chunk],
+    batch_size: int,
+    opensearch_api_key: Optional[str],
+    opensearch_user: Optional[str],
+    opensearch_password: Optional[str],
+    verify_ssl: bool,
+) -> None:
+    if not chunks:
+        return
+    base = normalize_base_url(opensearch_url)
+    bulk_url = f"{base}/{index_name}/_bulk?refresh=true"
+    for batch in batched(chunks, batch_size):
+        lines: List[str] = []
+        for item in batch:
+            lines.append(json.dumps({"index": {"_id": item.chunk_id}}))
+            lines.append(
+                json.dumps(
+                    {
+                        "chunk_id": item.chunk_id,
+                        "source_name": item.source_name,
+                        "source_path": item.source_path,
+                        "chunk_index": item.chunk_index,
+                        "text": item.text,
+                        "metadata": item.metadata,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        payload = "\n".join(lines) + "\n"
+        resp = opensearch_request(
+            method="POST",
+            url=bulk_url,
+            opensearch_api_key=opensearch_api_key,
+            opensearch_user=opensearch_user,
+            opensearch_password=opensearch_password,
+            verify_ssl=verify_ssl,
+            content=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("errors"):
+            raise SystemExit("OpenSearch bulk indexing returned errors.")
+
+
 def cmd_ingest(args: argparse.Namespace) -> None:
     files = collect_files(args.inputs)
     if not files:
         raise SystemExit("No supported files found (.pdf, .docx, .txt)")
 
-    chunks = build_chunks(files, chunk_size=args.chunk_size, chunk_overlap=args.chunk_overlap)
+    metadata = parse_metadata_pairs(args.metadata)
+    chunks = build_chunks(
+        files,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
+        metadata=metadata,
+    )
     if not chunks:
         raise SystemExit("No text chunks extracted. Check input files.")
 
@@ -458,6 +656,7 @@ def cmd_ingest(args: argparse.Namespace) -> None:
                         "chunk_index": item.chunk_index,
                         "chunk_id": item.chunk_id,
                         "text": item.text,
+                        "metadata": item.metadata,
                     },
                 )
             )
@@ -473,6 +672,37 @@ def cmd_ingest(args: argparse.Namespace) -> None:
         print(f"Qdrant URL: {args.qdrant_url}")
     print(f"Collection: {args.collection}")
     print(f"Embedding model: {args.embedding_model}")
+
+    if args.opensearch_url and args.opensearch_index:
+        ensure_opensearch_index(
+            opensearch_url=args.opensearch_url,
+            index_name=args.opensearch_index,
+            opensearch_api_key=args.opensearch_api_key,
+            opensearch_user=args.opensearch_user,
+            opensearch_password=args.opensearch_password,
+            verify_ssl=not args.opensearch_insecure,
+        )
+        remove_existing_opensearch_sources(
+            opensearch_url=args.opensearch_url,
+            index_name=args.opensearch_index,
+            source_paths=[str(p) for p in files],
+            opensearch_api_key=args.opensearch_api_key,
+            opensearch_user=args.opensearch_user,
+            opensearch_password=args.opensearch_password,
+            verify_ssl=not args.opensearch_insecure,
+        )
+        upsert_opensearch_chunks(
+            opensearch_url=args.opensearch_url,
+            index_name=args.opensearch_index,
+            chunks=chunks,
+            batch_size=args.batch_size,
+            opensearch_api_key=args.opensearch_api_key,
+            opensearch_user=args.opensearch_user,
+            opensearch_password=args.opensearch_password,
+            verify_ssl=not args.opensearch_insecure,
+        )
+        print(f"OpenSearch URL: {args.opensearch_url}")
+        print(f"OpenSearch index: {args.opensearch_index}")
 
 
 def rerank_candidates(query: str, candidates: List[dict], dense_weight: float) -> List[dict]:
@@ -542,6 +772,142 @@ def api_rerank_scores(
     return scores
 
 
+def build_qdrant_filter(source_name: Optional[str], metadata: Dict[str, Any]) -> Optional[models.Filter]:
+    must: List[models.FieldCondition] = []
+    if source_name:
+        must.append(models.FieldCondition(key="source_name", match=models.MatchValue(value=source_name)))
+    for key, value in metadata.items():
+        if key in {"source_name", "source_path", "chunk_id", "chunk_index"}:
+            field_key = key
+        else:
+            field_key = f"metadata.{key}"
+        must.append(models.FieldCondition(key=field_key, match=models.MatchValue(value=value)))
+    if not must:
+        return None
+    return models.Filter(must=must)
+
+
+def search_opensearch(
+    opensearch_url: str,
+    index_name: str,
+    query: str,
+    size: int,
+    metadata: Dict[str, Any],
+    source_name: Optional[str],
+    opensearch_api_key: Optional[str],
+    opensearch_user: Optional[str],
+    opensearch_password: Optional[str],
+    verify_ssl: bool,
+) -> List[dict]:
+    base = normalize_base_url(opensearch_url)
+    url = f"{base}/{index_name}/_search"
+
+    filters = []
+    if source_name:
+        filters.append({"term": {"source_name": source_name}})
+    for key, value in metadata.items():
+        if key in {"source_name", "source_path", "chunk_id", "chunk_index"}:
+            field_key = key
+        else:
+            field_key = f"metadata.{key}"
+        filters.append({"term": {field_key: value}})
+
+    body = {
+        "size": size,
+        "_source": ["chunk_id", "source_name", "source_path", "chunk_index", "text", "metadata"],
+        "query": {
+            "bool": {
+                "must": [{"match": {"text": {"query": query}}}],
+                "filter": filters,
+            }
+        },
+    }
+
+    resp = opensearch_request(
+        method="POST",
+        url=url,
+        opensearch_api_key=opensearch_api_key,
+        opensearch_user=opensearch_user,
+        opensearch_password=opensearch_password,
+        verify_ssl=verify_ssl,
+        json_body=body,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    hits = data.get("hits", {}).get("hits", [])
+
+    candidates: List[dict] = []
+    for row in hits:
+        src = row.get("_source", {})
+        text = str(src.get("text", ""))
+        if not text.strip():
+            continue
+        chunk_id = src.get("chunk_id") or str(row.get("_id", ""))
+        candidates.append(
+            {
+                "rank": 0,
+                "chunk_id": str(chunk_id),
+                "source_name": src.get("source_name", "unknown"),
+                "source_path": src.get("source_path", "unknown"),
+                "chunk_index": src.get("chunk_index", -1),
+                "text": text,
+                "opensearch_score_raw": float(row.get("_score") or 0.0),
+            }
+        )
+    return candidates
+
+
+def lexical_overlap_score(query: str, text: str) -> float:
+    q_tokens = set(tokenize_for_lexical(query))
+    d_tokens = set(tokenize_for_lexical(text))
+    if not q_tokens or not d_tokens:
+        return 0.0
+    return len(q_tokens & d_tokens) / max(1, len(q_tokens))
+
+
+def fuse_candidates(query: str, qdrant_candidates: List[dict], opensearch_candidates: List[dict], dense_weight: float) -> List[dict]:
+    dense_weight = min(1.0, max(0.0, dense_weight))
+    lexical_weight = 1.0 - dense_weight
+
+    merged: Dict[str, dict] = {}
+    for c in qdrant_candidates:
+        merged[c["chunk_id"]] = dict(c)
+    for c in opensearch_candidates:
+        existing = merged.get(c["chunk_id"])
+        if existing:
+            existing["opensearch_score_raw"] = c.get("opensearch_score_raw", 0.0)
+        else:
+            merged[c["chunk_id"]] = {
+                "rank": 0,
+                "dense_score_raw": 0.0,
+                "opensearch_score_raw": c.get("opensearch_score_raw", 0.0),
+                "chunk_id": c["chunk_id"],
+                "source_name": c.get("source_name", "unknown"),
+                "source_path": c.get("source_path", "unknown"),
+                "chunk_index": c.get("chunk_index", -1),
+                "text": c.get("text", ""),
+            }
+
+    merged_items = list(merged.values())
+    dense_norm = minmax_normalize([float(x.get("dense_score_raw", 0.0)) for x in merged_items])
+    os_norm = minmax_normalize([float(x.get("opensearch_score_raw", 0.0)) for x in merged_items])
+    local_lex_norm = minmax_normalize([lexical_overlap_score(query, str(x.get("text", ""))) for x in merged_items])
+
+    reranked: List[dict] = []
+    for item, d_norm, o_norm, lx_norm in zip(merged_items, dense_norm, os_norm, local_lex_norm):
+        lexical_norm = max(o_norm, lx_norm)
+        row = dict(item)
+        row["dense_score"] = d_norm
+        row["bm25_score"] = lexical_norm
+        row["opensearch_score"] = o_norm
+        row["local_lexical_score"] = lx_norm
+        row["score"] = dense_weight * d_norm + lexical_weight * lexical_norm
+        reranked.append(row)
+
+    reranked.sort(key=lambda x: x["score"], reverse=True)
+    return reranked
+
+
 def retrieve_chunks(
     query: str,
     db_path: Optional[Path],
@@ -557,6 +923,14 @@ def retrieve_chunks(
     min_score: float,
     dense_weight: float,
     source_name: Optional[str],
+    metadata: Dict[str, Any],
+    opensearch_url: Optional[str],
+    opensearch_index: Optional[str],
+    opensearch_api_key: Optional[str],
+    opensearch_user: Optional[str],
+    opensearch_password: Optional[str],
+    opensearch_insecure: bool,
+    rerank_blend: float,
     rerank_url: Optional[str],
     rerank_api_key: Optional[str],
     rerank_model: Optional[str],
@@ -571,11 +945,7 @@ def retrieve_chunks(
     )
     query_vector = embed_texts(embedder, [query], model_name=embedding_model, is_query=True)[0]
 
-    query_filter = None
-    if source_name:
-        query_filter = models.Filter(
-            must=[models.FieldCondition(key="source_name", match=models.MatchValue(value=source_name))]
-        )
+    query_filter = build_qdrant_filter(source_name=source_name, metadata=metadata)
 
     hits_response = client.query_points(
         collection_name=collection_name,
@@ -587,13 +957,13 @@ def retrieve_chunks(
     )
     hits = hits_response.points
 
-    candidates = []
+    qdrant_candidates = []
     for hit in hits:
         payload = hit.payload or {}
         text = str(payload.get("text", ""))
         if not text.strip():
             continue
-        candidates.append(
+        qdrant_candidates.append(
             {
                 "rank": 0,
                 "dense_score_raw": float(hit.score),
@@ -605,14 +975,33 @@ def retrieve_chunks(
             }
         )
 
-    # Default path: no local rerank, return by dense similarity.
-    reranked = []
-    for c in sorted(candidates, key=lambda x: x["dense_score_raw"], reverse=True):
-        item = dict(c)
-        item["dense_score"] = float(c["dense_score_raw"])
-        item["bm25_score"] = 0.0
-        item["score"] = float(c["dense_score_raw"])
-        reranked.append(item)
+    opensearch_candidates: List[dict] = []
+    if opensearch_url and opensearch_index:
+        try:
+            opensearch_candidates = search_opensearch(
+                opensearch_url=opensearch_url,
+                index_name=opensearch_index,
+                query=query,
+                size=fetch_k,
+                metadata=metadata,
+                source_name=source_name,
+                opensearch_api_key=opensearch_api_key,
+                opensearch_user=opensearch_user,
+                opensearch_password=opensearch_password,
+                verify_ssl=not opensearch_insecure,
+            )
+        except Exception:
+            # Soft-fail: retrieval still works with Qdrant-only path.
+            opensearch_candidates = []
+
+    reranked = fuse_candidates(
+        query=query,
+        qdrant_candidates=qdrant_candidates,
+        opensearch_candidates=opensearch_candidates,
+        dense_weight=dense_weight,
+    )
+    for row in reranked:
+        row["api_rerank_score"] = 0.0
 
     # Best mode for this project: when external embedder is used, rerank via the same endpoint by default.
     resolved_rerank_url = rerank_url or embedder_url
@@ -620,26 +1009,21 @@ def retrieve_chunks(
         rerank_api_key,
         ["HACKAI_API_KEY", "OPENAI_API_KEY"],
     )
-    if resolved_rerank_url and resolved_rerank_key and candidates:
+    if resolved_rerank_url and resolved_rerank_key and reranked:
         api_scores = api_rerank_scores(
             rerank_url=resolved_rerank_url,
             rerank_api_key=resolved_rerank_key,
             rerank_model=rerank_model,
             query=query,
-            documents=[c["text"] for c in candidates],
+            documents=[c["text"] for c in reranked],
         )
         if api_scores is not None:
-            dense_norm = minmax_normalize([c["dense_score_raw"] for c in candidates])
             api_norm = minmax_normalize(api_scores)
-            mixed = []
-            for c, d_norm, a_norm in zip(candidates, dense_norm, api_norm):
-                item = dict(c)
-                item["dense_score"] = d_norm
-                item["bm25_score"] = a_norm
-                item["score"] = dense_weight * d_norm + (1.0 - dense_weight) * a_norm
-                mixed.append(item)
-            mixed.sort(key=lambda x: x["score"], reverse=True)
-            reranked = mixed
+            blend = min(1.0, max(0.0, rerank_blend))
+            for item, a_norm in zip(reranked, api_norm):
+                item["api_rerank_score"] = a_norm
+                item["score"] = (1.0 - blend) * float(item["score"]) + blend * a_norm
+            reranked.sort(key=lambda x: x["score"], reverse=True)
 
     results = [item for item in reranked if item["score"] >= min_score][:top_k]
     for idx, item in enumerate(results, start=1):
@@ -648,6 +1032,7 @@ def retrieve_chunks(
 
 
 def cmd_retrieve(args: argparse.Namespace) -> None:
+    metadata = parse_metadata_pairs(args.metadata)
     results = retrieve_chunks(
         query=args.query,
         db_path=Path(args.db_path).resolve() if args.db_path else None,
@@ -663,6 +1048,14 @@ def cmd_retrieve(args: argparse.Namespace) -> None:
         min_score=args.min_score,
         dense_weight=args.dense_weight,
         source_name=args.source_name,
+        metadata=metadata,
+        opensearch_url=args.opensearch_url,
+        opensearch_index=args.opensearch_index,
+        opensearch_api_key=args.opensearch_api_key,
+        opensearch_user=args.opensearch_user,
+        opensearch_password=args.opensearch_password,
+        opensearch_insecure=args.opensearch_insecure,
+        rerank_blend=args.rerank_blend,
         rerank_url=args.rerank_url,
         rerank_api_key=args.rerank_api_key or args.api_key,
         rerank_model=args.rerank_model,
@@ -680,6 +1073,9 @@ def cmd_retrieve(args: argparse.Namespace) -> None:
         "collection": args.collection,
         "embedding_model": args.embedding_model,
         "embedder_url": args.embedder_url,
+        "opensearch_url": args.opensearch_url,
+        "opensearch_index": args.opensearch_index,
+        "metadata_filter": metadata,
         "results": results,
     }
 
@@ -790,6 +1186,7 @@ def generate_answer_with_openai(
 
 
 def cmd_ask(args: argparse.Namespace) -> None:
+    metadata = parse_metadata_pairs(args.metadata)
     results = retrieve_chunks(
         query=args.query,
         db_path=Path(args.db_path).resolve() if args.db_path else None,
@@ -805,6 +1202,14 @@ def cmd_ask(args: argparse.Namespace) -> None:
         min_score=args.min_score,
         dense_weight=args.dense_weight,
         source_name=args.source_name,
+        metadata=metadata,
+        opensearch_url=args.opensearch_url,
+        opensearch_index=args.opensearch_index,
+        opensearch_api_key=args.opensearch_api_key,
+        opensearch_user=args.opensearch_user,
+        opensearch_password=args.opensearch_password,
+        opensearch_insecure=args.opensearch_insecure,
+        rerank_blend=args.rerank_blend,
         rerank_url=args.rerank_url,
         rerank_api_key=args.rerank_api_key or args.api_key,
         rerank_model=args.rerank_model,
@@ -828,6 +1233,9 @@ def cmd_ask(args: argparse.Namespace) -> None:
         "answer": answer,
         "model": args.model,
         "used_chunks": len(results),
+        "metadata_filter": metadata,
+        "opensearch_url": args.opensearch_url,
+        "opensearch_index": args.opensearch_index,
         "results": results,
     }
 
@@ -862,7 +1270,15 @@ def add_shared_retrieval_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--fetch-k", type=int, default=30, help="How many candidates to fetch before rerank")
     p.add_argument("--min-score", type=float, default=0.20, help="Min final reranked score (0..1)")
     p.add_argument("--dense-weight", type=float, default=0.75, help="Dense weight in hybrid rerank (0..1)")
+    p.add_argument("--rerank-blend", type=float, default=0.35, help="Blend weight for API rerank over hybrid score (0..1)")
     p.add_argument("--source-name", default=None, help="Optional source filename filter")
+    p.add_argument("--metadata", action="append", default=[], help="Metadata filter key=value (repeatable)")
+    p.add_argument("--opensearch-url", default=None, help="OpenSearch URL, e.g. https://localhost:9200")
+    p.add_argument("--opensearch-index", default=None, help="OpenSearch index name")
+    p.add_argument("--opensearch-api-key", default=None, help="OpenSearch API key (Authorization: ApiKey ...)")
+    p.add_argument("--opensearch-user", default=None, help="OpenSearch basic auth username")
+    p.add_argument("--opensearch-password", default=None, help="OpenSearch basic auth password")
+    p.add_argument("--opensearch-insecure", action="store_true", help="Disable TLS certificate verification")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -883,6 +1299,13 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--batch-size", type=int, default=64, help="Upsert batch size")
     ingest.add_argument("--embedding-model", default="intfloat/multilingual-e5-large", help="FastEmbed model")
     ingest.add_argument("--embedding-cache", default="data/embedding_cache", help="Path to embedding model cache")
+    ingest.add_argument("--metadata", action="append", default=[], help="Attach metadata key=value to all chunks")
+    ingest.add_argument("--opensearch-url", default=None, help="Optional OpenSearch URL for parallel indexing")
+    ingest.add_argument("--opensearch-index", default=None, help="OpenSearch index name")
+    ingest.add_argument("--opensearch-api-key", default=None, help="OpenSearch API key")
+    ingest.add_argument("--opensearch-user", default=None, help="OpenSearch basic auth username")
+    ingest.add_argument("--opensearch-password", default=None, help="OpenSearch basic auth password")
+    ingest.add_argument("--opensearch-insecure", action="store_true", help="Disable TLS certificate verification")
     ingest.set_defaults(func=cmd_ingest)
 
     retrieve = sub.add_parser("retrieve", help="Retrieve top-k chunks from Qdrant")
