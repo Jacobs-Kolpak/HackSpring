@@ -22,7 +22,7 @@ class RemoteLLMClient:
     def __init__(self, config: RemoteLLMConfig):
         self.config = config
 
-    def generate(self, prompt: str, max_new_tokens: int = 220, temperature: float = 0.2) -> str:
+    def generate(self, prompt: str, max_new_tokens: Optional[int] = None, temperature: float = 0.2) -> str:
         errors = []
         candidates = self._build_candidates(prompt=prompt, max_new_tokens=max_new_tokens, temperature=temperature)
 
@@ -43,7 +43,7 @@ class RemoteLLMClient:
     def _build_candidates(
         self,
         prompt: str,
-        max_new_tokens: int,
+        max_new_tokens: Optional[int],
         temperature: float,
     ) -> List[Tuple[str, Dict[str, Any]]]:
         openai_payload: Dict[str, Any] = {
@@ -52,28 +52,29 @@ class RemoteLLMClient:
                 {"role": "user", "content": prompt},
             ],
             "temperature": temperature,
-            "max_tokens": max_new_tokens,
         }
+        if max_new_tokens is not None:
+            openai_payload["max_tokens"] = max_new_tokens
         if self.config.model.strip():
             openai_payload["model"] = self.config.model.strip()
 
         generate_payload: Dict[str, Any] = {
             "prompt": prompt,
-            "max_new_tokens": max_new_tokens,
             "temperature": temperature,
             "stream": False,
         }
+        if max_new_tokens is not None:
+            generate_payload["max_new_tokens"] = max_new_tokens
         if self.config.model.strip():
             generate_payload["model"] = self.config.model.strip()
 
         ollama_payload: Dict[str, Any] = {
             "prompt": prompt,
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_new_tokens,
-            },
+            "options": {"temperature": temperature},
         }
+        if max_new_tokens is not None:
+            ollama_payload["options"]["num_predict"] = max_new_tokens
         if self.config.model.strip():
             ollama_payload["model"] = self.config.model.strip()
 
@@ -86,7 +87,12 @@ class RemoteLLMClient:
             ("/chat/completions", openai_payload),
             ("/api/v1/chat/completions", openai_payload),
             ("/openai/v1/chat/completions", openai_payload),
-            ("/v1/completions", {"prompt": prompt, "max_tokens": max_new_tokens, "temperature": temperature, **({"model": self.config.model.strip()} if self.config.model.strip() else {})}),
+            ("/v1/completions", {
+                "prompt": prompt,
+                "temperature": temperature,
+                **({"max_tokens": max_new_tokens} if max_new_tokens is not None else {}),
+                **({"model": self.config.model.strip()} if self.config.model.strip() else {}),
+            }),
             ("/generate", generate_payload),
             ("/v1/generate", generate_payload),
             ("/api/v1/generate", generate_payload),

@@ -39,19 +39,13 @@ def parse_args() -> argparse.Namespace:
         "--tone",
         type=str,
         default="scientific",
-        help="Тональность диалога: scientific|popular или научный|популярный",
+        help="Тональность диалога: scientific|everyday (popular) или научный|повседневный",
     )
     parser.add_argument(
         "--pace",
         type=str,
         default="normal",
         help="Темп речи: slow|normal|fast или медленно|нормально|быстро",
-    )
-    parser.add_argument(
-        "--audio-max-new-tokens",
-        type=int,
-        default=320,
-        help="Максимум новых токенов для аудио-диалога",
     )
     parser.add_argument("--dialog-output", type=Path, default=Path("audio/dialogue.txt"), help="Куда сохранить текст диалога")
     parser.add_argument("--audio-output", type=Path, default=Path("audio/podcast.wav"), help="Куда сохранить audio wav")
@@ -104,7 +98,6 @@ def run_audio(args: argparse.Namespace, source_text: str) -> None:
             config=PodcastConfig(
                 tone=tone,
                 pace=pace,
-                max_new_tokens=args.audio_max_new_tokens,
             ),
         )
     except RuntimeError as exc:
@@ -129,12 +122,15 @@ def _normalize_tone(value: str) -> str:
         "science": "scientific",
         "научный": "scientific",
         "научно": "scientific",
-        "popular": "popular",
-        "популярный": "popular",
-        "простыми": "popular",
+        "everyday": "everyday",
+        "повседневный": "everyday",
+        "повседневно": "everyday",
+        "popular": "everyday",
+        "популярный": "everyday",
+        "простыми": "everyday",
     }
     if tone not in mapping:
-        allowed = "scientific|popular или научный|популярный"
+        allowed = "scientific|everyday (popular) или научный|повседневный"
         raise SystemExit(f"Некорректный --tone: {value}. Используйте {allowed}.")
     return mapping[tone]
 

@@ -1,85 +1,50 @@
 from __future__ import annotations
 
 import re
+import tempfile
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from common.remote_llm import RemoteLLMClient
+
 
 @dataclass
 class PodcastConfig:
-    tone: str = "scientific"  # scientific | popular
+    tone: str = "scientific"  # scientific | everyday
     pace: str = "normal"      # slow | normal | fast
     max_facts: int = 6
-    model_name: str = "google/flan-t5-small"
-    max_new_tokens: int = 220
 
 
 class PodcastGenerator:
-    """Легковесная генерация аудиопересказа в формате диалога двух ведущих."""
+    """Генерация аудиопересказа в формате диалога двух ведущих через удаленный LLM API."""
 
-    def __init__(self, model_name: str = "google/flan-t5-small"):
-        self.model_name = model_name
-        self._generator = self._load_generator()
-
-    def _load_generator(self):
-        try:
-            from transformers import pipeline  # type: ignore
-
-            return pipeline("text2text-generation", model=self.model_name)
-        except Exception:
-            return None
+    def __init__(self, remote_llm_client: RemoteLLMClient):
+        self.remote_llm_client = remote_llm_client
 
     def generate_dialogue(self, text: str, topic: str, config: Optional[PodcastConfig] = None) -> str:
         cfg = config or PodcastConfig()
         clean = self._clean(text)
+        context = clean
+        prompt = self._build_prompt(text=context, topic=topic, tone=cfg.tone, pace=cfg.pace)
 
-        # 1) Пытаемся сгенерировать диалог через модель.
-        if self._generator is not None:
-            generated = self._generate_with_model(clean, topic, cfg)
-            if generated:
-                return generated
+        raw = self.remote_llm_client.generate(
+            prompt=prompt,
+            temperature=0.3,
+        )
+        normalized = self._normalize_dialogue(raw)
+        if not normalized:
+            normalized = self._coerce_dialogue_from_free_text(raw)
 
-        # 2) При недоступности модели — fallback.
-        facts = self._extract_key_facts(clean, cfg.max_facts)
-
-        if not facts:
-            facts = ["Данных недостаточно для содержательного пересказа."]
-
-        intro_1, intro_2, bridge, outro = self._style_phrases(cfg.tone, topic)
-
-        lines: List[str] = []
-        lines.append(f"Ведущий 1: {intro_1}")
-        lines.append(f"Ведущий 2: {intro_2}")
-
-        for i, fact in enumerate(facts, start=1):
-            if i % 2 == 1:
-                lines.append(f"Ведущий 1: {bridge} {fact}")
-            else:
-                lines.append(f"Ведущий 2: {bridge} {fact}")
-
-        lines.append(f"Ведущий 2: {outro}")
-        return "\n".join(lines)
-
-    def _generate_with_model(self, text: str, topic: str, config: PodcastConfig) -> Optional[str]:
-        prompt = self._build_prompt(text=text, topic=topic, tone=config.tone)
-        try:
-            chunk = prompt[:3500]
-            result = self._generator(
-                chunk,
-                max_new_tokens=config.max_new_tokens,
-                do_sample=False,
+        if not normalized or self._is_low_quality_dialogue(normalized):
+            raise RuntimeError(
+                "Удаленный LLM вернул некорректный диалог. "
+                "Проверьте remote-model/промпт."
             )
-            if not result:
-                return None
-            raw = result[0].get("generated_text", "").strip()
-            normalized = self._normalize_dialogue(raw)
-            return normalized if normalized else None
-        except Exception:
-            return None
+        return normalized
 
     def save_audio(self, dialogue: str, output_path: Path, pace: str = "normal") -> bool:
-        """Пытается сохранить WAV через pyttsx3. Возвращает True при успехе."""
         try:
             import pyttsx3  # type: ignore
 
@@ -88,10 +53,38 @@ class PodcastGenerator:
 
             base_rate = engine.getProperty("rate") or 180
             factor = {"slow": 0.85, "normal": 1.0, "fast": 1.2}.get(pace, 1.0)
-            engine.setProperty("rate", int(base_rate * factor))
+            tts_rate = int(base_rate * factor)
+            chunks = self._split_dialogue_for_tts(dialogue)
 
-            # В легковесной версии озвучиваем общий текст с пометками ведущих.
-            engine.save_to_file(dialogue, str(output_path))
+            if not chunks:
+                engine.setProperty("rate", tts_rate)
+                clean_dialogue = re.sub(r"Ведущий\s*[12]\s*:", "", dialogue)
+                engine.save_to_file(clean_dialogue, str(output_path))
+                engine.runAndWait()
+                return output_path.exists() and output_path.stat().st_size > 0
+
+            voices = engine.getProperty("voices") or []
+            voice_1, voice_2 = self._pick_two_voices(voices)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                temp_files: List[Path] = []
+                for idx, (speaker, text_part) in enumerate(chunks, start=1):
+                    tmp_file = Path(tmpdir) / f"part_{idx:03d}.wav"
+                    engine.setProperty("rate", tts_rate)
+                    if speaker == 1 and voice_1:
+                        engine.setProperty("voice", voice_1)
+                    elif speaker == 2 and voice_2:
+                        engine.setProperty("voice", voice_2)
+                    engine.save_to_file(text_part, str(tmp_file))
+                    temp_files.append(tmp_file)
+
+                engine.runAndWait()
+                if self._concat_wav_files(temp_files, output_path):
+                    return True
+
+            engine = pyttsx3.init()
+            engine.setProperty("rate", tts_rate)
+            clean_dialogue = re.sub(r"Ведущий\s*[12]\s*:", "", dialogue)
+            engine.save_to_file(clean_dialogue, str(output_path))
             engine.runAndWait()
             return output_path.exists() and output_path.stat().st_size > 0
         except Exception:
@@ -99,24 +92,26 @@ class PodcastGenerator:
 
     @staticmethod
     def _clean(text: str) -> str:
-        return re.sub(r"\s+", " ", text).strip()
+        normalized = re.sub(r"\s+", " ", text).strip()
+        normalized = re.sub(r"([.!?])([А-ЯA-Z])", r"\1 \2", normalized)
+        return normalized
 
     @staticmethod
     def _split_sentences(text: str) -> List[str]:
-        return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+        prepared = text.replace("●", "\n").replace("•", "\n").replace("▪", "\n").replace("◦", "\n")
+        parts = re.split(r"(?<=[.!?])\s+|\n+", prepared)
+        return [s.strip() for s in parts if s.strip()]
 
     def _extract_key_facts(self, text: str, limit: int) -> List[str]:
         sentences = self._split_sentences(text)
         if not sentences:
             return []
-
         words = re.findall(r"[А-Яа-яA-Za-z0-9-]+", text.lower())
         stop = {
             "и", "в", "во", "на", "с", "со", "по", "о", "об", "для", "а", "но", "или",
             "к", "ко", "из", "за", "под", "при", "что", "это", "как", "так", "от", "до",
             "the", "and", "of", "to", "in", "for", "a", "is", "on", "with", "that",
         }
-
         freq = {}
         for w in words:
             if len(w) < 3 or w in stop:
@@ -131,36 +126,27 @@ class PodcastGenerator:
 
         ranked = sorted(enumerate(sentences), key=lambda p: score(p[1]), reverse=True)
         best_idx = sorted(i for i, _ in ranked[:limit])
-        return [sentences[i] for i in best_idx]
+        facts = [self._normalize_fact(sentences[i]) for i in best_idx]
+        return [fact for fact in facts if fact][:limit]
+
+    def _prepare_model_context(self, text: str, limit: int = 6) -> str:
+        facts = self._extract_key_facts(text, limit)
+        if not facts:
+            return text[:1800]
+        return "\n".join(f"- {fact}" for fact in facts[:limit])
 
     @staticmethod
-    def _style_phrases(tone: str, topic: str):
-        if tone == "popular":
-            return (
-                f"Привет! Сегодня коротко и понятно разбираем тему: {topic}.",
-                "Сделаем это в формате живого диалога и выделим главное.",
-                "Проще говоря,",
-                "На этом все, главное мы разобрали."
-            )
+    def _build_prompt(text: str, topic: str, tone: str, pace: str) -> str:
+        tone_hint = "научный" if tone == "scientific" else "повседневный"
+        pace_hint = "медленный" if pace == "slow" else ("быстрый" if pace == "fast" else "средний")
         return (
-            f"Добрый день. Рассматриваем материал по теме: {topic}.",
-            "Сфокусируемся на ключевых фактах и практических выводах.",
-            "Зафиксируем следующий тезис:",
-            "Итог: основные положения представлены в структурированном виде."
-        )
-
-    @staticmethod
-    def _build_prompt(text: str, topic: str, tone: str) -> str:
-        tone_hint = "научный, нейтральный и точный" if tone == "scientific" else "популярный, живой и простой"
-        return (
-            "Сгенерируй короткий диалог двух ведущих на русском языке.\n"
-            "Формат строго:\n"
-            "Ведущий 1: ...\n"
-            "Ведущий 2: ...\n"
-            "8-12 реплик, без нумерации.\n"
-            f"Тон: {tone_hint}.\n"
+            "Сделай диалог двух ведущих по этому тексту.\n"
+            f"Стиль: {tone_hint}.\n"
+            f"Темп речи: {pace_hint}.\n"
+            "Формат строк: только 'Ведущий 1: ...' и 'Ведущий 2: ...'.\n"
             f"Тема: {topic}.\n"
-            f"Материал:\n{text}\n"
+            f"Текст:\n{text}\n"
+            "Диалог:"
         )
 
     @staticmethod
@@ -174,7 +160,87 @@ class PodcastGenerator:
                 normalized.append(line.replace("Speaker 1:", "Ведущий 1:", 1))
             elif line.startswith("Speaker 2:"):
                 normalized.append(line.replace("Speaker 2:", "Ведущий 2:", 1))
-
-        if len(normalized) < 4:
+        if len(normalized) < 6:
             return ""
         return "\n".join(normalized)
+
+    @staticmethod
+    def _coerce_dialogue_from_free_text(raw: str) -> str:
+        text = re.sub(r"\s+", " ", raw).strip()
+        if not text:
+            return ""
+        parts = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+        if len(parts) < 6:
+            return ""
+        lines: List[str] = []
+        speaker = 1
+        for sentence in parts:
+            sentence = sentence.strip(' "\'')
+            if len(sentence) < 8:
+                continue
+            lines.append(f"Ведущий {speaker}: {sentence}")
+            speaker = 2 if speaker == 1 else 1
+        return "\n".join(lines) if len(lines) >= 6 else ""
+
+    @staticmethod
+    def _normalize_fact(text: str) -> str:
+        fact = text.strip().lstrip("-*•●▪◦ ")
+        fact = re.sub(r"\s+", " ", fact)
+        if len(re.findall(r"[А-Яа-яA-Za-z0-9-]+", fact)) < 5:
+            return ""
+        return fact[:220].rstrip(" ,;:")
+
+    @staticmethod
+    def _is_low_quality_dialogue(dialogue: str) -> bool:
+        lines = [line.strip() for line in dialogue.splitlines() if line.strip()]
+        if len(lines) < 6:
+            return True
+        has_1 = any(line.startswith("Ведущий 1:") for line in lines)
+        has_2 = any(line.startswith("Ведущий 2:") for line in lines)
+        return not (has_1 and has_2)
+
+    @staticmethod
+    def _split_dialogue_for_tts(dialogue: str) -> List[tuple[int, str]]:
+        chunks: List[tuple[int, str]] = []
+        for line in dialogue.splitlines():
+            clean = line.strip()
+            if not clean:
+                continue
+            match = re.match(r"^Ведущий\s*([12])\s*:\s*(.+)$", clean)
+            if not match:
+                continue
+            chunks.append((int(match.group(1)), match.group(2).strip()))
+        return chunks
+
+    @staticmethod
+    def _pick_two_voices(voices: list) -> tuple[Optional[str], Optional[str]]:
+        if not voices:
+            return None, None
+        if len(voices) == 1:
+            voice_id = getattr(voices[0], "id", None)
+            return voice_id, voice_id
+        return getattr(voices[0], "id", None), getattr(voices[1], "id", None)
+
+    @staticmethod
+    def _concat_wav_files(parts: List[Path], output_path: Path) -> bool:
+        valid_parts = [p for p in parts if p.exists() and p.stat().st_size > 44]
+        if not valid_parts:
+            return False
+        try:
+            with wave.open(str(valid_parts[0]), "rb") as first:
+                params = first.getparams()
+                frames = [first.readframes(first.getnframes())]
+            for path in valid_parts[1:]:
+                with wave.open(str(path), "rb") as wf:
+                    if wf.getnchannels() != params.nchannels or wf.getframerate() != params.framerate:
+                        continue
+                    frames.append(wf.readframes(wf.getnframes()))
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(output_path), "wb") as out:
+                out.setparams(params)
+                for data in frames:
+                    out.writeframes(data)
+            return output_path.exists() and output_path.stat().st_size > 44
+        except Exception:
+            return False
