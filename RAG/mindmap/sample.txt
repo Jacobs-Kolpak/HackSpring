@@ -1,3 +1,0 @@
-Кандидат развивает backend на Python и FastAPI.
-Кандидат применяет SQL, PostgreSQL и Docker в проектах.
-Python и FastAPI используются для API сервисов и аналитики.

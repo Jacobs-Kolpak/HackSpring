@@ -1,11 +1,4 @@
-"""
-API роутер для RAG-системы.
-
-Эндпоинты:
-- POST /ingest   — загрузка и индексация документов
-- POST /retrieve — поиск по запросу
-- POST /ask      — поиск + генерация ответа через LLM
-"""
+"""Роутер RAG: ingest, retrieve, ask."""
 
 from __future__ import annotations
 
@@ -16,21 +9,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-from backend.config import settings
-from backend.services.chunker import build_chunks
-from backend.services.document_reader import SUPPORTED_EXTENSIONS
-from backend.services.embeddings import embed_texts, get_embedder
-from backend.services.retrieval import (
-    build_context,
-    generate_answer,
-    retrieve_chunks,
-)
-from backend.services.vector_store import (
-    ensure_collection,
-    get_client,
-    remove_sources,
-    upsert_chunks,
-)
+from backend.services import rag as rag_service
+from backend.utils.document_reader import SUPPORTED_EXTENSIONS
 
 router = APIRouter(prefix="/api/rag", tags=["RAG"])
 
@@ -39,7 +19,7 @@ router = APIRouter(prefix="/api/rag", tags=["RAG"])
 
 
 class RetrieveRequest(BaseModel):
-    """Запрос на поиск чанков."""
+    """Запрос на поиск."""
 
     query: str = Field(..., min_length=1)
     collection: Optional[str] = None
@@ -48,17 +28,16 @@ class RetrieveRequest(BaseModel):
     min_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     dense_weight: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     source_name: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AskRequest(RetrieveRequest):
-    """Запрос на поиск + генерацию ответа."""
+    """Запрос на поиск + ответ LLM."""
 
     model: Optional[str] = None
 
 
 class RetrieveResponse(BaseModel):
-    """Ответ с результатами поиска."""
+    """Результаты поиска."""
 
     query: str
     returned: int
@@ -66,7 +45,7 @@ class RetrieveResponse(BaseModel):
 
 
 class AskResponse(BaseModel):
-    """Ответ с генерацией от LLM."""
+    """Ответ LLM + источники."""
 
     query: str
     answer: str
@@ -76,73 +55,24 @@ class AskResponse(BaseModel):
 
 
 class IngestResponse(BaseModel):
-    """Ответ после индексации."""
+    """Результат индексации."""
 
     indexed_files: int
     inserted_chunks: int
     collection: str
 
 
-# ── Helpers ─────────────────────────────────────────────────
-
-
-def _retrieve_with_config(
-    query: str,
-    collection: Optional[str] = None,
-    top_k: Optional[int] = None,
-    fetch_k: Optional[int] = None,
-    min_score: Optional[float] = None,
-    dense_weight: Optional[float] = None,
-    source_name: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    """Вызывает retrieve_chunks, подставляя дефолты из settings.rag."""
-    rag = settings.rag
-
-    return retrieve_chunks(
-        query=query,
-        db_path=Path(rag.vector_store_path).resolve(),
-        collection_name=collection or rag.collection,
-        embedding_model=rag.embeddings_model,
-        embedding_cache=Path("data/embedding_cache").resolve(),
-        embedder_url=rag.embedder_url or None,
-        embedder_api_key=rag.embedder_api_key or None,
-        top_k=top_k if top_k is not None else rag.top_k,
-        fetch_k=fetch_k if fetch_k is not None else rag.fetch_k,
-        min_score=min_score if min_score is not None else rag.min_score,
-        dense_weight=dense_weight if dense_weight is not None else rag.dense_weight,
-        source_name=source_name,
-        metadata=metadata,
-        rerank_blend=rag.rerank_blend,
-        rerank_url=rag.rerank_url or None,
-        rerank_api_key=rag.rerank_api_key or None,
-        rerank_model=rag.rerank_model or None,
-    )
-
-
 # ── Endpoints ───────────────────────────────────────────────
 
 
-@router.post(
-    "/ingest",
-    response_model=IngestResponse,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/ingest", response_model=IngestResponse, status_code=201)
 async def ingest_files(
     files: List[UploadFile] = File(...),
     collection: Optional[str] = Form(None),
     chunk_size: int = Form(0),
     chunk_overlap: int = Form(0),
 ) -> IngestResponse:
-    """Загружает файлы, разбивает на чанки и индексирует в Qdrant."""
-    rag = settings.rag
-
-    if chunk_size <= 0:
-        chunk_size = rag.chunk_size
-    if chunk_overlap <= 0:
-        chunk_overlap = rag.chunk_overlap
-    col = collection or rag.collection
-
+    """Загрузка и индексация документов."""
     temp_paths: List[Path] = []
     try:
         for upload in files:
@@ -150,89 +80,31 @@ async def ingest_files(
             if ext not in SUPPORTED_EXTENSIONS:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Unsupported file: {upload.filename}. "
-                    f"Allowed: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
+                    detail=f"Unsupported: {upload.filename}",
                 )
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=ext
-            ) as tmp:
-                data = await upload.read()
-                tmp.write(data)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                tmp.write(await upload.read())
                 temp_paths.append(Path(tmp.name))
 
-        chunks = build_chunks(
+        result = rag_service.ingest(
             paths=temp_paths,
+            collection=collection,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
-        if not chunks:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No text could be extracted from uploaded files",
-            )
+        if result["inserted_chunks"] == 0:
+            raise HTTPException(status_code=400, detail="No text extracted")
 
-        db_path = Path(rag.vector_store_path).resolve()
-        cache_dir = Path("data/embedding_cache").resolve()
-
-        embedder = get_embedder(
-            model_name=rag.embeddings_model,
-            cache_dir=cache_dir,
-            embedder_url=rag.embedder_url or None,
-            embedder_api_key=rag.embedder_api_key or None,
-        )
-
-        # Определяем размер вектора по первому чанку
-        sample_vec = embed_texts(
-            embedder,
-            [chunks[0].text],
-            model_name=rag.embeddings_model,
-            is_query=False,
-        )[0]
-
-        client = get_client(db_path=db_path)
-        ensure_collection(
-            client=client,
-            collection_name=col,
-            vector_size=len(sample_vec),
-        )
-
-        remove_sources(
-            client, col, [str(p) for p in temp_paths]
-        )
-
-        all_texts = [c.text for c in chunks]
-        all_vectors = embed_texts(
-            embedder,
-            all_texts,
-            model_name=rag.embeddings_model,
-            is_query=False,
-        )
-
-        total = upsert_chunks(
-            client=client,
-            collection_name=col,
-            chunks=chunks,
-            vectors=all_vectors,
-        )
-
-        return IngestResponse(
-            indexed_files=len(temp_paths),
-            inserted_chunks=total,
-            collection=col,
-        )
-
+        return IngestResponse(**result)
     finally:
-        for tmp_path in temp_paths:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:  # pylint: disable=broad-except
-                pass
+        for p in temp_paths:
+            p.unlink(missing_ok=True)
 
 
 @router.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve(payload: RetrieveRequest) -> RetrieveResponse:
-    """Поиск релевантных чанков по запросу."""
-    results = _retrieve_with_config(
+    """Поиск релевантных чанков."""
+    results = rag_service.retrieve(
         query=payload.query,
         collection=payload.collection,
         top_k=payload.top_k,
@@ -240,22 +112,16 @@ async def retrieve(payload: RetrieveRequest) -> RetrieveResponse:
         min_score=payload.min_score,
         dense_weight=payload.dense_weight,
         source_name=payload.source_name,
-        metadata=payload.metadata,
     )
-
     return RetrieveResponse(
-        query=payload.query,
-        returned=len(results),
-        results=results,
+        query=payload.query, returned=len(results), results=results
     )
 
 
 @router.post("/ask", response_model=AskResponse)
 async def ask(payload: AskRequest) -> AskResponse:
     """Поиск + генерация ответа через LLM."""
-    llm = settings.llm
-
-    results = _retrieve_with_config(
+    results = rag_service.retrieve(
         query=payload.query,
         collection=payload.collection,
         top_k=payload.top_k,
@@ -263,24 +129,14 @@ async def ask(payload: AskRequest) -> AskResponse:
         min_score=payload.min_score,
         dense_weight=payload.dense_weight,
         source_name=payload.source_name,
-        metadata=payload.metadata,
     )
-
     if not results:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No relevant chunks found for this query",
-        )
+        raise HTTPException(status_code=404, detail="No relevant chunks found")
 
-    model = payload.model or llm.model
-    context = build_context(results)
-    answer = generate_answer(
-        query=payload.query,
-        context=context,
-        model=model,
-        llm_url=llm.base_url,
-        llm_api_key=llm.api_key,
-    )
+    from backend.core.config import settings  # pylint: disable=import-outside-toplevel
+
+    model = payload.model or settings.llm.model
+    answer = rag_service.ask(payload.query, results, model)
 
     return AskResponse(
         query=payload.query,

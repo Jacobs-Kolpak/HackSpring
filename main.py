@@ -1,19 +1,19 @@
+"""Точка входа FastAPI-приложения."""
+
 import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.auth import router as auth_router
-from backend.config import settings
-from backend.database import Base, engine
+from backend.core.config import settings
+from backend.core.database import Base, engine
+from backend.routers.auth import router as auth_router
 from backend.routers.mindmap import router as mindmap_router
 from backend.routers.rag import router as rag_router
 
-# ── Логирование ─────────────────────────────────────────────
 logging.basicConfig(level=settings.LOG_LEVEL, format=settings.LOG_FORMAT)
 logger = logging.getLogger(__name__)
 
-# ── База ─────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -23,7 +23,6 @@ app = FastAPI(
     debug=settings.DEBUG,
 )
 
-# ── CORS ─────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -40,30 +39,28 @@ app.include_router(mindmap_router)
 
 @app.get("/")
 async def root():
-    """Return application info."""
+    """Информация о приложении."""
     return {
         "message": f"Welcome to {settings.APP_NAME}",
-        "version": "1.0.0",
-        "status": "running",
+        "version": settings.APP_VERSION,
         "docs": "/docs",
-        "redoc": "/redoc"
     }
 
 
 @app.get("/health")
 async def health_check():
-    """Return health check status."""
-    return {
-        "status": "healthy",
-        "app_name": settings.APP_NAME,
-        "version": "1.0.0"
-    }
+    """Health check."""
+    return {"status": "healthy", "app_name": settings.APP_NAME}
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting %s v%s on %s:%s", settings.APP_NAME, settings.APP_VERSION, settings.HOST, settings.PORT)
+    logger.info(
+        "Starting %s v%s on %s:%s",
+        settings.APP_NAME, settings.APP_VERSION,
+        settings.HOST, settings.PORT,
+    )
     uvicorn.run(
         "main:app",
         host=settings.HOST,

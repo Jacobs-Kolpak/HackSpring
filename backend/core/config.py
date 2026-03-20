@@ -1,29 +1,17 @@
-"""
-Единый конфиг-ридер проекта HackSpring.
-
-Читает .env файл из корня проекта и предоставляет типизированные
-настройки через pydantic-settings.  Каждый модуль (auth, rag, tts …)
-получает свою секцию, но все живут в одном Settings-объекте.
-
-Использование:
-    from backend.config import settings
-    print(settings.DATABASE_URL)
-    print(settings.llm.model)
-"""
+"""Единый конфиг проекта. Читает .env и предоставляет типизированные настройки."""
 
 from __future__ import annotations
 
 import json
+from functools import cached_property
 from pathlib import Path
 from typing import List
-
-from functools import cached_property
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Корень проекта — на уровень выше backend/
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+_ENV_FILE = str(BASE_DIR / ".env")
 
 
 # ── Вложенные секции ────────────────────────────────────────
@@ -36,8 +24,8 @@ class LLMSettings(BaseSettings):
 
     provider: str = "openai"
     api_key: str = ""
-    model: str = "gpt-4o-mini"
-    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-oss-20b"
+    base_url: str = "https://hackai.centrinvest.ru:6630"
     temperature: float = 0.7
     max_tokens: int = 4096
 
@@ -47,26 +35,17 @@ class RAGSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="RAG_", extra="ignore")
 
-    # Chunking
     chunk_size: int = 900
     chunk_overlap: int = 180
-
-    # Embeddings
     embeddings_model: str = "Qwen3-Embedding-0.6B"
     embedder_url: str = ""
     embedder_api_key: str = ""
-
-    # Vector store
     vector_store_path: str = str(BASE_DIR / "data" / "vector_store")
     collection: str = "docs"
-
-    # Retrieval
     top_k: int = 5
     fetch_k: int = 40
     min_score: float = 0.20
     dense_weight: float = 0.70
-
-    # Rerank
     rerank_blend: float = 0.35
     rerank_url: str = ""
     rerank_api_key: str = ""
@@ -74,7 +53,7 @@ class RAGSettings(BaseSettings):
 
 
 class TTSSettings(BaseSettings):
-    """Настройки Text-to-Speech (audio_summary)."""
+    """Настройки Text-to-Speech."""
 
     model_config = SettingsConfigDict(env_prefix="TTS_", extra="ignore")
 
@@ -96,10 +75,12 @@ class UploadSettings(BaseSettings):
 
     @property
     def allowed_extensions_list(self) -> List[str]:
+        """Список допустимых расширений."""
         return [ext.strip() for ext in self.allowed_extensions.split(",")]
 
     @property
     def max_size_bytes(self) -> int:
+        """Максимальный размер в байтах."""
         return self.max_size_mb * 1024 * 1024
 
 
@@ -107,15 +88,14 @@ class UploadSettings(BaseSettings):
 
 
 class Settings(BaseSettings):
-    """Корневые настройки приложения.  Читает .env автоматически."""
+    """Корневые настройки приложения."""
 
     model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"),
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    # -- App --
     APP_NAME: str = "HackSpring"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
@@ -125,41 +105,39 @@ class Settings(BaseSettings):
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
-    def _parse_cors(cls, v: object) -> object:
+    def _parse_cors(cls, v: object) -> object:  # noqa: N805
+        """Парсит CORS_ORIGINS из JSON-строки."""
         if isinstance(v, str):
             return json.loads(v)
         return v
 
-    # -- Database --
     DATABASE_URL: str = "sqlite:///./auth.db"
-
-    # -- JWT / Auth --
     SECRET_KEY: str = "change-me-to-random-64-char-string"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
-    # -- Logging --
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 
-    # -- Вложенные секции (инициализируются из того же .env, кэшируются) --
     @cached_property
     def llm(self) -> LLMSettings:
-        return LLMSettings(_env_file=str(BASE_DIR / ".env"))
+        """Настройки LLM."""
+        return LLMSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
     @cached_property
     def rag(self) -> RAGSettings:
-        return RAGSettings(_env_file=str(BASE_DIR / ".env"))
+        """Настройки RAG."""
+        return RAGSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
     @cached_property
     def tts(self) -> TTSSettings:
-        return TTSSettings(_env_file=str(BASE_DIR / ".env"))
+        """Настройки TTS."""
+        return TTSSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
     @cached_property
     def upload(self) -> UploadSettings:
-        return UploadSettings(_env_file=str(BASE_DIR / ".env"))
+        """Настройки загрузки файлов."""
+        return UploadSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
 
-# Синглтон — импортируй именно его
 settings = Settings()
