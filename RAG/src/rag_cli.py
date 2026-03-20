@@ -14,6 +14,11 @@ from qdrant_client import QdrantClient, models
 from rank_bm25 import BM25Okapi
 import httpx
 
+try:
+    from src.mindmap.generator import build_graph_data, render_mindmap_html
+except ModuleNotFoundError:
+    from mindmap.generator import build_graph_data, render_mindmap_html
+
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
@@ -1253,6 +1258,97 @@ def cmd_ask(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_mindmap(args: argparse.Namespace) -> None:
+    if not args.text_file and not args.query and not args.inputs:
+        raise SystemExit("Provide one source: --inputs, --text-file, or --query.")
+
+    metadata = parse_metadata_pairs(args.metadata)
+    title = args.title
+    text: str
+
+    if args.inputs:
+        files = collect_files(args.inputs)
+        if not files:
+            raise SystemExit("No supported files found in --inputs (.pdf, .docx, .txt).")
+        texts = [read_document(path) for path in files]
+        text = "\n\n".join(t for t in texts if t.strip())
+        if not text.strip():
+            raise SystemExit("No extractable text found in input files.")
+        if not title:
+            if len(files) == 1:
+                title = f"Mindmap: {files[0].name}"
+            else:
+                title = f"Mindmap: {len(files)} files"
+    elif args.text_file:
+        text_path = Path(args.text_file).expanduser().resolve()
+        if not text_path.exists():
+            raise SystemExit(f"Text file not found: {text_path}")
+        text = text_path.read_text(encoding="utf-8", errors="ignore")
+        if not title:
+            title = f"Mindmap: {text_path.name}"
+    else:
+        results = retrieve_chunks(
+            query=args.query,
+            db_path=Path(args.db_path).resolve() if args.db_path else None,
+            qdrant_url=args.qdrant_url,
+            qdrant_api_key=args.qdrant_api_key,
+            collection_name=args.collection,
+            embedding_model=args.embedding_model,
+            embedding_cache=Path(args.embedding_cache).resolve(),
+            embedder_url=args.embedder_url,
+            embedder_api_key=args.embedder_api_key or args.api_key,
+            top_k=args.top_k,
+            fetch_k=args.fetch_k,
+            min_score=args.min_score,
+            dense_weight=args.dense_weight,
+            source_name=args.source_name,
+            metadata=metadata,
+            opensearch_url=args.opensearch_url,
+            opensearch_index=args.opensearch_index,
+            opensearch_api_key=args.opensearch_api_key,
+            opensearch_user=args.opensearch_user,
+            opensearch_password=args.opensearch_password,
+            opensearch_insecure=args.opensearch_insecure,
+            rerank_blend=args.rerank_blend,
+            rerank_url=args.rerank_url,
+            rerank_api_key=args.rerank_api_key or args.api_key,
+            rerank_model=args.rerank_model,
+        )
+
+        if not results:
+            print("No relevant chunks found. Increase top-k or reduce min-score.")
+            return
+        text = "\n\n".join(item["text"] for item in results)
+        if not title:
+            title = f"Mindmap: {args.query}"
+
+    output_html = Path(args.output).expanduser().resolve()
+    nodes_count, edges_count = render_mindmap_html(
+        text=text,
+        output_html=output_html,
+        title=title or "Mindmap",
+        top_n_concepts=args.top_concepts,
+        min_concept_freq=args.min_concept_freq,
+        min_edge_weight=args.min_edge_weight,
+    )
+
+    if args.graph_json:
+        graph_json_path = Path(args.graph_json).expanduser().resolve()
+        graph_json_path.parent.mkdir(parents=True, exist_ok=True)
+        graph = build_graph_data(
+            text=text,
+            top_n_concepts=args.top_concepts,
+            min_concept_freq=args.min_concept_freq,
+            min_edge_weight=args.min_edge_weight,
+        )
+        graph_json_path.write_text(json.dumps(graph, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"Graph JSON: {graph_json_path}")
+
+    print(f"Mindmap HTML: {output_html}")
+    print(f"Nodes: {nodes_count}")
+    print(f"Edges: {edges_count}")
+
+
 def add_shared_retrieval_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--api-key", default=None, help="Shared API key for embedder/rerank/llm")
     p.add_argument("--db-path", default="data/qdrant", help="Path to local Qdrant storage")
@@ -1326,6 +1422,19 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--model", default="gpt-4.1-mini", help="OpenAI model for answer generation")
     ask.add_argument("--json", action="store_true", help="Output JSON")
     ask.set_defaults(func=cmd_ask)
+
+    mindmap = sub.add_parser("mindmap", help="Build interactive mindmap graph from text or retrieval results")
+    mindmap.add_argument("--query", default=None, help="Question/query text (used when --text-file is not provided)")
+    mindmap.add_argument("--inputs", nargs="+", default=None, help="Input files/dirs (.pdf/.docx/.txt) for direct mindmap")
+    mindmap.add_argument("--text-file", default=None, help="Path to plain text file to build mindmap from")
+    add_shared_retrieval_args(mindmap)
+    mindmap.add_argument("--output", default="mindmap/output/mindmap.html", help="Output HTML path")
+    mindmap.add_argument("--graph-json", default=None, help="Optional path to save graph JSON")
+    mindmap.add_argument("--title", default=None, help="Mindmap title")
+    mindmap.add_argument("--top-concepts", type=int, default=14, help="Maximum number of concept nodes")
+    mindmap.add_argument("--min-concept-freq", type=int, default=2, help="Minimum term frequency for node")
+    mindmap.add_argument("--min-edge-weight", type=int, default=1, help="Minimum co-occurrence count for edge")
+    mindmap.set_defaults(func=cmd_mindmap)
 
     return parser
 
