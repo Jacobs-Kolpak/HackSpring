@@ -197,12 +197,11 @@ def _split_for_tts(
 
 def _load_silero_model():  # type: ignore[no-untyped-def]
     global _silero_model, _silero_sample_rate, _silero_load_error  # noqa: PLW0603
-    if _silero_load_error:
-        return None, None
     if _silero_model is not None:
         return _silero_model, _silero_sample_rate
     try:
         import ssl  # pylint: disable=import-outside-toplevel
+
         import torch  # pylint: disable=import-outside-toplevel
         from silero import silero_tts  # pylint: disable=import-outside-toplevel
 

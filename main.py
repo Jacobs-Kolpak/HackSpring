@@ -6,17 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import settings
 from backend.core.database import Base, engine
 from backend.routers.auth.routes import router as auth_router
-from backend.routers.rag.routes import router as rag_router
-from backend.routers.content.summary import router as summary_router
 from backend.routers.content.flashcards import router as flashcards_router
 from backend.routers.content.mindmap import router as mindmap_router
+from backend.routers.content.summary import router as summary_router
 from backend.routers.content.table import router as table_router
+from backend.routers.media.infographics import router as infographics_router
 from backend.routers.media.podcast import router as podcast_router
 from backend.routers.media.presentation import router as presentation_router
-from backend.routers.media.infographics import router as infographics_router
 from backend.routers.media.video import router as video_router
+from backend.routers.rag.routes import router as rag_router
 from backend.routers.web.parser import router as parser_router
-
 
 logging.basicConfig(level=settings.LOG_LEVEL, format=settings.LOG_FORMAT)
 logger = logging.getLogger(__name__)

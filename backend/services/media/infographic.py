@@ -223,7 +223,6 @@ def _pad_points(
 
 def _build_facts(results: List[Dict[str, Any]], max_points: int) -> Dict[str, Any]:
     scores = [max(0.0, _to_float(r.get("score"), 0.0)) for r in results]
-    score_total = sum(scores) or 1.0
 
     src_acc: Dict[str, Dict[str, float]] = defaultdict(lambda: {"sum": 0.0, "cnt": 0.0})
     src_chunk_count: Counter[str] = Counter()

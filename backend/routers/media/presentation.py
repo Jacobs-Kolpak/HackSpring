@@ -99,9 +99,9 @@ async def generate_from_results(
 
 @router.get("/download/{filename}")
 async def download(filename: str) -> FileResponse:
-    from backend.core.config import settings
-
     from pathlib import Path
+
+    from backend.core.config import settings
     path = Path(settings.presentation.output_dir).resolve() / filename
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Файл не найден")

@@ -7,7 +7,6 @@ from typing import Optional
 from backend.utils.document_reader import read_document
 from backend.utils.llm import generate_text
 
-
 DEFAULT_TEMPLATE = (
     "Сделай суммаризацию этого текста на русском языке.\n"
     "Тема: {topic}\n"
