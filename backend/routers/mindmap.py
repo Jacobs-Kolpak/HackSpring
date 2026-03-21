@@ -22,9 +22,9 @@ class MindmapResponse(BaseModel):
 @router.post("/file", response_model=MindmapResponse)
 async def from_file(
     file: UploadFile = File(...),
-    top_concepts: int = Form(14),
+    top_concepts: int = Form(10),
     min_freq: int = Form(2),
-    min_edge: int = Form(1),
+    min_edge: int = Form(2),
 ) -> MindmapResponse:
     ext = Path(file.filename or "").suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -52,5 +52,7 @@ async def from_file(
             "filename": file.filename,
             "nodes_count": len(graph["nodes"]),
             "edges_count": len(graph["edges"]),
+            "summary": graph.get("meta", {}).get("summary", ""),
+            "top_terms": graph.get("meta", {}).get("top_terms", []),
         },
     )
