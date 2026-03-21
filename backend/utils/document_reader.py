@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Set
+from typing import Any, Callable, Dict, List, Set
 
 SUPPORTED_EXTENSIONS: Set[str] = {".pdf", ".docx", ".txt"}
+
+
+@dataclass
+class DocumentSegment:
+    text: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 def normalize_whitespace(text: str) -> str:
@@ -75,13 +82,28 @@ def read_txt(path: Path) -> str:
 
 
 def read_pdf(path: Path) -> str:
+    return "\n\n".join(segment.text for segment in read_pdf_segments(path))
+
+
+def read_pdf_segments(path: Path) -> List[DocumentSegment]:
     try:
-        return _read_pdf_pymupdf(path)
+        pages = _read_pdf_pages_pymupdf(path)
     except Exception:  # pylint: disable=broad-except
-        return _read_pdf_pypdf(path)
+        pages = _read_pdf_pages_pypdf(path)
+
+    segments: List[DocumentSegment] = []
+    for idx, page_text in enumerate(pages, start=1):
+        normalized = normalize_text(page_text)
+        if not normalized:
+            continue
+        segments.append(DocumentSegment(
+            text=normalized,
+            metadata={"page_number": idx, "page_label": str(idx)},
+        ))
+    return segments
 
 
-def _read_pdf_pymupdf(path: Path) -> str:
+def _read_pdf_pages_pymupdf(path: Path) -> List[str]:
     import fitz  # pylint: disable=import-outside-toplevel
 
     parts: List[str] = []
@@ -95,16 +117,14 @@ def _read_pdf_pymupdf(path: Path) -> str:
                 str(b[4]).strip() for b in blocks if str(b[4]).strip()
             ]
             parts.append("\n".join(lines))
-    result: str = "\n\n".join(parts)
-    return result
+    return parts
 
 
-def _read_pdf_pypdf(path: Path) -> str:
+def _read_pdf_pages_pypdf(path: Path) -> List[str]:
     from pypdf import PdfReader  # pylint: disable=import-outside-toplevel
 
     reader = PdfReader(str(path))
-    result: str = "\n\n".join(p.extract_text() or "" for p in reader.pages)
-    return result
+    return [p.extract_text() or "" for p in reader.pages]
 
 
 def read_docx(path: Path) -> str:
@@ -112,6 +132,13 @@ def read_docx(path: Path) -> str:
 
     doc = Document(str(path))
     return "\n".join(p.text for p in doc.paragraphs)
+
+
+def _segment_whole_document(text: str) -> List[DocumentSegment]:
+    normalized = normalize_text(text)
+    if not normalized:
+        return []
+    return [DocumentSegment(text=normalized)]
 
 
 _READERS: Dict[str, Callable[[Path], str]] = {
@@ -122,11 +149,28 @@ _READERS: Dict[str, Callable[[Path], str]] = {
 
 
 def read_document(path: Path) -> str:
+    try:
+        return "\n\n".join(segment.text for segment in read_document_segments(path))
+    except FileNotFoundError:
+        return ""
+
+
+def read_document_segments(path: Path) -> List[DocumentSegment]:
     ext = path.suffix.lower()
+    if ext == ".pdf":
+        try:
+            return read_pdf_segments(path)
+        except FileNotFoundError:
+            return []
+
     reader = _READERS.get(ext)
     if reader is None:
         raise ValueError(f"Unsupported extension: {ext}")
-    return normalize_text(reader(path))
+
+    try:
+        return _segment_whole_document(reader(path))
+    except FileNotFoundError:
+        return []
 
 
 def collect_files(paths: List[str]) -> List[Path]:

@@ -118,6 +118,8 @@ def _upsert_batch(
                     "source_name": c.source_name,
                     "chunk_index": c.chunk_index,
                     "chunk_id": c.chunk_id,
+                    "page_number": c.metadata.get("page_number"),
+                    "page_label": c.metadata.get("page_label"),
                     "text": c.text,
                     "metadata": c.metadata,
                 },
@@ -213,6 +215,7 @@ def _search_qdrant(
     results: List[Dict[str, Any]] = []
     for hit in resp.points:
         payload = hit.payload or {}
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
         text = str(payload.get("text", ""))
         if not text.strip():
             continue
@@ -225,6 +228,8 @@ def _search_qdrant(
             "source_name": payload.get("source_name", "unknown"),
             "source_path": payload.get("source_path", "unknown"),
             "chunk_index": payload.get("chunk_index", -1),
+            "page_number": payload.get("page_number", metadata.get("page_number")),
+            "page_label": payload.get("page_label", metadata.get("page_label")),
             "text": text,
         })
     return results
@@ -359,9 +364,23 @@ def _api_rerank(
 
 def build_context(results: List[Dict[str, Any]]) -> str:
     return "\n\n".join(
-        f"[{r['source_name']} chunk={r['chunk_index']}]\n{r['text']}"
+        f"[{_build_source_tag(r)}]\n{r['text']}"
         for r in results
     )
+
+
+def _build_source_tag(result: Dict[str, Any]) -> str:
+    parts = [str(result.get("source_name", "unknown"))]
+    page_label = result.get("page_label")
+    page_number = result.get("page_number")
+    if page_label:
+        parts.append(f"page={page_label}")
+    elif page_number is not None:
+        parts.append(f"page={page_number}")
+    chunk_index = result.get("chunk_index")
+    if chunk_index is not None:
+        parts.append(f"chunk={chunk_index}")
+    return " ".join(parts)
 
 
 def ask(query: str, results: List[Dict[str, Any]], model: Optional[str] = None) -> str:

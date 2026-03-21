@@ -1,5 +1,4 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/jacobs';
-
 export const API_ROUTES = {
   AUTH: {
     LOGIN: `${API_BASE_URL}/auth/login`,
@@ -41,5 +40,8 @@ export const API_ROUTES = {
   TABLE: {
     TEXT: `${API_BASE_URL}/table/text`,
     FILE: `${API_BASE_URL}/table/file`,
+  },
+  VIDEO: {
+    GENERATE: `${API_BASE_URL}/video/from-file`,
   },
 };

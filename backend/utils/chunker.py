@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from backend.utils.document_reader import read_document
+from backend.utils.document_reader import read_document_segments
 
 
 @dataclass
@@ -100,18 +100,25 @@ def build_chunks(
     overrides = dict(source_name_overrides or {})
 
     for path in paths:
-        text = read_document(path)
-        if not text:
+        segments = read_document_segments(path)
+        if not segments:
             continue
         resolved = str(path.resolve())
         source_name = overrides.get(resolved) or overrides.get(str(path)) or path.name
-        for idx, piece in enumerate(chunk_text(text, size, overlap)):
-            result.append(Chunk(
-                chunk_id=make_chunk_id(path, idx, piece),
-                source_path=str(path),
-                source_name=source_name,
-                chunk_index=idx,
-                text=piece,
-                metadata=shared,
-            ))
+        chunk_index = 0
+        for segment in segments:
+            if not segment.text:
+                continue
+            chunk_metadata = dict(shared)
+            chunk_metadata.update(segment.metadata)
+            for piece in chunk_text(segment.text, size, overlap):
+                result.append(Chunk(
+                    chunk_id=make_chunk_id(path, chunk_index, piece),
+                    source_path=str(path),
+                    source_name=source_name,
+                    chunk_index=chunk_index,
+                    text=piece,
+                    metadata=dict(chunk_metadata),
+                ))
+                chunk_index += 1
     return result
