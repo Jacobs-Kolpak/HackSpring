@@ -34,6 +34,9 @@ httpx>=0.27,<1
 # ── Presentation ──────────────────────────────────────────
 python-pptx>=1.0,<2
 
+# ── Table extraction ─────────────────────────────────────
+openpyxl>=3.1,<4
+
 # ── Web Parser ───────────────────────────────────────────
 beautifulsoup4>=4.12,<5
 trafilatura>=1.6,<2

@@ -13,6 +13,7 @@ from backend.routers.rag import router as rag_router
 from backend.routers.presentation import router as presentation_router
 from backend.routers.parser import router as parser_router
 from backend.routers.summary import router as summary_router
+from backend.routers.table import router as table_router
 
 logging.basicConfig(level=settings.LOG_LEVEL, format=settings.LOG_FORMAT)
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,6 +43,7 @@ app.include_router(podcast_router)
 app.include_router(flashcards_router)
 app.include_router(presentation_router)
 app.include_router(parser_router)
+app.include_router(table_router)
 
 
 @app.get("/")

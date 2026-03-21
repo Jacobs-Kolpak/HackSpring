@@ -24,13 +24,15 @@ def _sanitize_filename(name: str) -> str:
 def _extract_json(raw: str) -> Dict[str, Any]:
     text = raw.strip()
     if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:].strip()
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
     start = text.find("{")
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
-        raise ValueError("LLM response does not contain JSON object")
+        start = text.find("[")
+        end = text.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("LLM response does not contain JSON")
     return json.loads(text[start : end + 1])
 
 

@@ -3,7 +3,7 @@
 > Альтернатива NotebookLM с RAG, mind maps, audio summaries, flashcards, презентациями.
 > Хакатон Центр Инвест 2026.
 >
-> **Команда:** Данил (RAG, Mind Map, Flashcards), Миша (Summary, Podcast + TTS), Яковкин (Презентации)
+> **Команда:** Данил (RAG, Mind Map, Flashcards, Web Parser), Миша (Summary, Podcast + TTS, Table Extraction), Яковкин (Презентации)
 
 ---
 
@@ -24,9 +24,9 @@ docker compose up --build -d
 ```
 backend/
 ├── core/           # config, database, security
-├── utils/          # document_reader, chunker, embeddings, llm
-├── services/       # rag, mindmap, summary, podcast, flashcards, presentation
-├── routers/        # auth, rag, mindmap, summary, podcast, flashcards, presentation
+├── utils/          # document_reader, chunker, embeddings, llm, web_parser
+├── services/       # rag, mindmap, summary, podcast, flashcards, presentation, table, parser
+├── routers/        # auth, rag, mindmap, summary, podcast, flashcards, presentation, table, parser
 └── schemas.py      # Pydantic-модели
 ```
 
@@ -581,6 +581,145 @@ curl -O http://localhost:8000/api/jacobs/presentation/download/presentation_2026
 
 ---
 
+### Table — `/api/jacobs/table`
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| POST | `/api/jacobs/table/text` | Таблица из текста |
+| POST | `/api/jacobs/table/file` | Таблица из файла (JSON/CSV/XLSX) |
+
+#### Из текста
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/table/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Москва - 12 млн жителей, Ростов-на-Дону - 1.1 млн, Краснодар - 1 млн",
+    "hint": "города и население",
+    "format": "json"
+  }'
+```
+
+Параметры:
+- `text` — текст для структурирования
+- `hint` — подсказка для LLM (опционально)
+- `format` — формат ответа: `json` | `csv` | `xlsx` (по умолчанию `json`)
+
+**Ответ (format=json):**
+```json
+{
+  "title": "Население городов",
+  "columns": ["Город", "Население"],
+  "rows": [
+    ["Москва", "12 млн"],
+    ["Ростов-на-Дону", "1.1 млн"],
+    ["Краснодар", "1 млн"]
+  ]
+}
+```
+
+#### Из файла
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/table/file \
+  -F "file=@document.pdf" \
+  -F "hint=подсказка" \
+  -F "format=json"
+```
+
+#### Скачать как CSV
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/table/file \
+  -F "file=@document.pdf" \
+  -F "format=csv" \
+  -o table.csv
+```
+
+#### Скачать как XLSX
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/table/file \
+  -F "file=@document.pdf" \
+  -F "format=xlsx" \
+  -o table.xlsx
+```
+
+---
+
+### Parser — `/api/jacobs/parser`
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| POST | `/api/jacobs/parser/parse` | Парсинг веб-страниц |
+| POST | `/api/jacobs/parser/ingest` | Парсинг + загрузка в RAG |
+
+#### Парсинг сайта
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/parser/parse \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "max_pages": 5,
+    "max_depth": 1,
+    "same_domain": true
+  }'
+```
+
+Параметры:
+- `url` — начальный URL для парсинга
+- `max_pages` — макс. страниц (по умолчанию 10)
+- `max_depth` — глубина обхода (по умолчанию 1)
+- `same_domain` — только тот же домен (по умолчанию `true`)
+- `min_chars` — мин. символов для страницы (по умолчанию 280)
+
+**Ответ:**
+```json
+{
+  "pages": [
+    {
+      "url": "https://example.com",
+      "title": "Example Page",
+      "text": "Извлечённый текст...",
+      "extractor": "trafilatura",
+      "quality_score": 0.87,
+      "depth": 0
+    }
+  ],
+  "stats": {
+    "total_pages": 1,
+    "avg_quality": 0.87,
+    "extractors": {"trafilatura": 1}
+  }
+}
+```
+
+#### Парсинг + загрузка в RAG
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/parser/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "max_pages": 5,
+    "max_depth": 1
+  }'
+```
+
+**Ответ:**
+```json
+{
+  "parsed_pages": 3,
+  "indexed_files": 3,
+  "inserted_chunks": 24,
+  "collection": "docs_ci",
+  "stats": {"total_pages": 3, "avg_quality": 0.82, "extractors": {"trafilatura": 2, "bs4-main": 1}}
+}
+```
+
+---
+
 ## Полный сценарий тестирования
 
 ```bash
@@ -644,6 +783,28 @@ curl -X POST http://localhost:8000/api/jacobs/presentation/generate \
 # 11. Mind map из файла
 curl -X POST http://localhost:8000/api/jacobs/mindmap/file \
   -F "file=@your_document.pdf"
+
+# 12. Таблица из файла (JSON)
+curl -X POST http://localhost:8000/api/jacobs/table/file \
+  -F "file=@your_document.pdf" \
+  -F "hint=ключевые данные" \
+  -F "format=json"
+
+# 13. Таблица из файла (скачать XLSX)
+curl -X POST http://localhost:8000/api/jacobs/table/file \
+  -F "file=@your_document.pdf" \
+  -F "format=xlsx" \
+  -o table.xlsx
+
+# 14. Парсинг сайта
+curl -X POST http://localhost:8000/api/jacobs/parser/parse \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "max_pages": 3}'
+
+# 15. Парсинг + загрузка в RAG
+curl -X POST http://localhost:8000/api/jacobs/parser/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "max_pages": 3}'
 ```
 
 ---
@@ -698,4 +859,6 @@ docker compose down              # остановка
 - **Podcast:** Генерация диалога + TTS (Silero, 5 голосов: aidar, baya, eugene, kseniya, xenia)
 - **Flashcards:** Генерация карточек и тестов через LLM
 - **Presentation:** Генерация PPTX презентаций через LLM + python-pptx
+- **Table:** Извлечение структурированных таблиц из текста/файлов (JSON/CSV/XLSX)
+- **Parser:** BFS-краулер сайтов с auto-extraction (trafilatura, readability, bs4) + ingest в RAG
 - **Infra:** Docker Compose, PostgreSQL, Qdrant
