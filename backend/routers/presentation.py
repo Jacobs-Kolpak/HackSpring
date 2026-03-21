@@ -36,55 +36,65 @@ class PresentationFromResultsRequest(BaseModel):
 
 @router.post("/generate", response_model=PresentationResponse)
 async def generate_from_rag(body: PresentationRequest) -> PresentationResponse:
-    results = rag_service.retrieve(
-        body.query,
-        collection=body.collection,
-        top_k=body.top_k,
-    )
-    if not results:
-        raise HTTPException(
-            status_code=404,
-            detail="RAG не нашёл релевантных документов",
+    try:
+        results = rag_service.retrieve(
+            body.query,
+            collection=body.collection,
+            top_k=body.top_k,
+        )
+        if not results:
+            raise HTTPException(
+                status_code=404,
+                detail="RAG не нашёл релевантных документов",
+            )
+
+        from backend.core.config import settings
+        used_model = body.model or settings.llm.model
+
+        path, meta = pres_service.generate_presentation(
+            body.query,
+            results,
+            model=used_model,
+            max_slides=body.max_slides,
         )
 
-    from backend.core.config import settings
-    used_model = body.model or settings.llm.model
-
-    path, meta = pres_service.generate_presentation(
-        body.query,
-        results,
-        model=used_model,
-        max_slides=body.max_slides,
-    )
-
-    return PresentationResponse(
-        title=meta["title"],
-        slides_count=meta["slides_count"],
-        download_url=f"/api/jacobs/presentation/download/{path.name}",
-        meta=meta,
-    )
+        return PresentationResponse(
+            title=meta["title"],
+            slides_count=meta["slides_count"],
+            download_url=f"/api/jacobs/presentation/download/{path.name}",
+            meta=meta,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/from-results", response_model=PresentationResponse)
 async def generate_from_results(
     body: PresentationFromResultsRequest,
 ) -> PresentationResponse:
-    from backend.core.config import settings
-    used_model = body.model or settings.llm.model
+    try:
+        from backend.core.config import settings
+        used_model = body.model or settings.llm.model
 
-    path, meta = pres_service.generate_presentation(
-        body.query,
-        body.results,
-        model=used_model,
-        max_slides=body.max_slides,
-    )
+        path, meta = pres_service.generate_presentation(
+            body.query,
+            body.results,
+            model=used_model,
+            max_slides=body.max_slides,
+        )
 
-    return PresentationResponse(
-        title=meta["title"],
-        slides_count=meta["slides_count"],
-        download_url=f"/api/jacobs/presentation/download/{path.name}",
-        meta=meta,
-    )
+        return PresentationResponse(
+            title=meta["title"],
+            slides_count=meta["slides_count"],
+            download_url=f"/api/jacobs/presentation/download/{path.name}",
+            meta=meta,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/download/{filename}")

@@ -26,6 +26,8 @@ async def from_file(
     topic: str = Form("Без названия"),
     max_sentences: int = Form(10),
     model: Optional[str] = Form(None),
+    template: Optional[str] = Form(None),
+    system_prompt: Optional[str] = Form(None),
 ) -> SummaryResponse:
     ext = Path(file.filename or "").suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
@@ -43,6 +45,8 @@ async def from_file(
             topic=topic,
             max_sentences=max_sentences,
             model=used_model,
+            template=template,
+            system_prompt=system_prompt,
         )
     finally:
         temp_path.unlink(missing_ok=True)
@@ -51,5 +55,5 @@ async def from_file(
         summary=result,
         source="file",
         model=used_model,
-        meta={"filename": file.filename},
+        meta={"filename": file.filename, "custom_template": template is not None},
     )

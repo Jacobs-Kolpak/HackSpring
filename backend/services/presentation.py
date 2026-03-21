@@ -33,7 +33,14 @@ def _extract_json(raw: str) -> Dict[str, Any]:
         end = text.rfind("]")
         if start == -1 or end == -1 or end <= start:
             raise ValueError("LLM response does not contain JSON")
-    return json.loads(text[start : end + 1])
+    fragment = text[start : end + 1]
+    try:
+        return json.loads(fragment)
+    except json.JSONDecodeError:
+        cleaned = re.sub(r",\s*([}\]])", r"\1", fragment)
+        cleaned = re.sub(r"'", '"', cleaned)
+        cleaned = re.sub(r"\n", " ", cleaned)
+        return json.loads(cleaned)
 
 
 def _build_context(results: List[Dict[str, Any]]) -> str:

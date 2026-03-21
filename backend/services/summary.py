@@ -8,29 +8,46 @@ from backend.utils.document_reader import read_document
 from backend.utils.llm import generate_text
 
 
+DEFAULT_TEMPLATE = (
+    "Сделай суммаризацию этого текста на русском языке.\n"
+    "Тема: {topic}\n"
+    "Желаемая длина: {max_sentences} предложений.\n"
+    "Текст:\n{text}\n"
+    "Суммаризация:"
+)
+
+DEFAULT_SYSTEM = (
+    "Ты — ассистент для суммаризации текстов. "
+    "Пиши кратко и по делу на русском языке."
+)
+
+
 def summarize(
     text: str,
     *,
     topic: str = "Без названия",
     max_sentences: int = 10,
     model: Optional[str] = None,
+    template: Optional[str] = None,
+    system_prompt: Optional[str] = None,
 ) -> str:
     cleaned = re.sub(r"\s+", " ", text).strip()
     if not cleaned:
         return "Недостаточно данных для суммаризации."
 
     chunk = cleaned[:9000]
-    prompt = (
-        "Сделай суммаризацию этого текста на русском языке.\n"
-        f"Тема: {topic}\n"
-        f"Желаемая длина: {max(3, min(max_sentences, 100))} предложений.\n"
-        f"Текст:\n{chunk}\n"
-        "Суммаризация:"
+    bounded = max(3, min(max_sentences, 100))
+
+    tmpl = template or DEFAULT_TEMPLATE
+    prompt = tmpl.format(
+        topic=topic,
+        max_sentences=bounded,
+        text=chunk,
     )
+
     result = generate_text(
         prompt,
-        system="Ты — ассистент для суммаризации текстов. "
-               "Пиши кратко и по делу на русском языке.",
+        system=system_prompt or DEFAULT_SYSTEM,
         model=model,
         temperature=0.2,
         max_tokens=2000,
@@ -49,10 +66,17 @@ def summarize_file(
     topic: str = "Без названия",
     max_sentences: int = 10,
     model: Optional[str] = None,
+    template: Optional[str] = None,
+    system_prompt: Optional[str] = None,
 ) -> str:
     text = read_document(path)
     if not text.strip():
         raise ValueError("В файле не найден текст.")
     return summarize(
-        text, topic=topic, max_sentences=max_sentences, model=model
+        text,
+        topic=topic,
+        max_sentences=max_sentences,
+        model=model,
+        template=template,
+        system_prompt=system_prompt,
     )
