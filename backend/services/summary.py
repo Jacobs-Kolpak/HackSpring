@@ -39,11 +39,14 @@ def summarize(
     bounded = max(3, min(max_sentences, 100))
 
     tmpl = template or DEFAULT_TEMPLATE
-    prompt = tmpl.format(
-        topic=topic,
-        max_sentences=bounded,
-        text=chunk,
-    )
+    if template and "{text}" not in template:
+        prompt = f"{template}\n\nТекст:\n{chunk}"
+    else:
+        prompt = tmpl.format(
+            topic=topic,
+            max_sentences=bounded,
+            text=chunk,
+        )
 
     result = generate_text(
         prompt,

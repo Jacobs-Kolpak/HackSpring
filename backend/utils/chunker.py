@@ -93,19 +93,23 @@ def build_chunks(
     size: int,
     overlap: int,
     metadata: Optional[Dict[str, Any]] = None,
+    source_name_overrides: Optional[Dict[str, str]] = None,
 ) -> List[Chunk]:
     result: List[Chunk] = []
     shared = dict(metadata or {})
+    overrides = dict(source_name_overrides or {})
 
     for path in paths:
         text = read_document(path)
         if not text:
             continue
+        resolved = str(path.resolve())
+        source_name = overrides.get(resolved) or overrides.get(str(path)) or path.name
         for idx, piece in enumerate(chunk_text(text, size, overlap)):
             result.append(Chunk(
                 chunk_id=make_chunk_id(path, idx, piece),
                 source_path=str(path),
-                source_name=path.name,
+                source_name=source_name,
                 chunk_index=idx,
                 text=piece,
                 metadata=shared,
