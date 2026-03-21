@@ -44,5 +44,9 @@ readability-lxml>=0.8,<1
 
 # ── Audio / TTS (Silero) ──────────────────────────────────
 torch>=2.1.0
+silero
 numpy>=1.24.0
 omegaconf>=2.3.0
+
+# ── Video generation (slides + ffmpeg) ───────────────────
+Pillow>=10.0.0

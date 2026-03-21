@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import wave
 from dataclasses import dataclass
@@ -7,6 +8,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from backend.utils.llm import generate_text
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,6 +38,7 @@ _PACE_MAP = {
 
 _silero_model = None
 _silero_sample_rate = 48000
+_silero_load_error: str = ""
 
 
 def normalize_tone(value: str) -> str:
@@ -192,24 +196,41 @@ def _split_for_tts(
 
 
 def _load_silero_model():  # type: ignore[no-untyped-def]
-    global _silero_model, _silero_sample_rate  # noqa: PLW0603
+    global _silero_model, _silero_sample_rate, _silero_load_error  # noqa: PLW0603
+    if _silero_load_error:
+        return None, None
     if _silero_model is not None:
         return _silero_model, _silero_sample_rate
     try:
+        import ssl  # pylint: disable=import-outside-toplevel
         import torch  # pylint: disable=import-outside-toplevel
+        from silero import silero_tts  # pylint: disable=import-outside-toplevel
 
-        model, _ = torch.hub.load(
-            repo_or_dir="snakers4/silero-models",
-            model="silero_tts",
+        # Отключаем проверку SSL — внутри контейнера бывают проблемы с сертификатами
+        ssl._create_default_https_context = ssl._create_unverified_context
+
+        logger.info("Loading Silero TTS via silero pip package...")
+        model, symbols, sample_rate, example_text, apply_tts = silero_tts(
             language="ru",
             speaker="v4_ru",
-            trust_repo=True,
         )
+        logger.info("Silero loaded via pip package OK")
+
         _silero_model = model
-        _silero_sample_rate = 48000
+        _silero_sample_rate = sample_rate
+        model.apply_tts(text="Тест.", speaker="baya", sample_rate=sample_rate)
+        logger.info("Silero TTS test passed")
         return _silero_model, _silero_sample_rate
-    except Exception:  # pylint: disable=broad-except
+    except Exception as exc:  # pylint: disable=broad-except
+        _silero_load_error = f"{type(exc).__name__}: {exc}"
+        logger.error("Silero load failed: %s", _silero_load_error)
         return None, None
+
+
+def _sanitize_tts_text(text: str) -> str:
+    cleaned = re.sub(r"[^\w\s.,!?;:()\"'«»—-]", " ", text, flags=re.UNICODE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:280]
 
 
 def save_audio(
@@ -227,15 +248,21 @@ def save_audio(
 
     model, sample_rate = _load_silero_model()
     if model is None or sample_rate is None:
+        logger.error("Silero model not loaded, load_error=%s", _silero_load_error)
         return False
+
+    logger.info("Silero model loaded OK, sample_rate=%s", sample_rate)
 
     chunks = _split_for_tts(dialogue)
     if not chunks:
         clean = re.sub(r"Ведущий\s*[12]\s*:\s*", "", dialogue).strip()
         chunks = [(1, clean)] if clean else []
 
+    logger.info("TTS chunks count: %d", len(chunks))
+
     wav_parts: list = []
     pause = np.zeros(int(0.14 * sample_rate), dtype=np.float32)
+    success_chunks = 0
 
     for speaker_id, text_part in chunks:
         text_part = text_part.strip()
@@ -251,14 +278,35 @@ def save_audio(
                 put_accent=True,
                 put_yo=True,
             )
-        except Exception:  # pylint: disable=broad-except
-            return False
+        except Exception as exc1:
+            logger.warning(
+                "TTS failed for chunk (speaker=%s, len=%d): %s. Text: %.80s",
+                speaker, len(text_part), exc1, text_part,
+            )
+            safe_text = _sanitize_tts_text(text_part)
+            if not safe_text:
+                continue
+            try:
+                audio = model.apply_tts(
+                    text=safe_text,
+                    speaker=speaker,
+                    sample_rate=sample_rate,
+                    put_accent=True,
+                    put_yo=True,
+                )
+            except Exception as exc2:
+                logger.warning(
+                    "TTS sanitized retry also failed: %s. Safe text: %.80s",
+                    exc2, safe_text,
+                )
+                continue
 
         wav = audio.detach().cpu().numpy().astype(np.float32)
         wav_parts.append(wav)
         wav_parts.append(pause)
+        success_chunks += 1
 
-    if not wav_parts:
+    if not wav_parts or success_chunks == 0:
         return False
 
     full_audio = np.concatenate(wav_parts)

@@ -15,6 +15,7 @@ from backend.routers.presentation import router as presentation_router
 from backend.routers.parser import router as parser_router
 from backend.routers.summary import router as summary_router
 from backend.routers.table import router as table_router
+from backend.routers.video import router as video_router
 
 logging.basicConfig(level=settings.LOG_LEVEL, format=settings.LOG_FORMAT)
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ app.include_router(presentation_router)
 app.include_router(infographics_router)
 app.include_router(parser_router)
 app.include_router(table_router)
+app.include_router(video_router)
 
 
 @app.get("/")
