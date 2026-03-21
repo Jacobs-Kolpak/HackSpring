@@ -1,7 +1,9 @@
 # HackSpring — AI-платформа для исследований
 
-> Альтернатива NotebookLM с RAG, mind maps, audio summaries.
+> Альтернатива NotebookLM с RAG, mind maps, audio summaries, flashcards, презентациями.
 > Хакатон Центр Инвест 2026.
+>
+> **Команда:** Данил (RAG, Mind Map, Flashcards), Миша (Summary, Podcast + TTS), Яковкин (Презентации)
 
 ---
 
@@ -22,9 +24,9 @@ docker compose up --build -d
 ```
 backend/
 ├── core/           # config, database, security
-├── utils/          # document_reader, chunker, embeddings
-├── services/       # rag, mindmap (бизнес-логика)
-├── routers/        # auth, rag, mindmap (HTTP-слой)
+├── utils/          # document_reader, chunker, embeddings, llm
+├── services/       # rag, mindmap, summary, podcast, flashcards, presentation
+├── routers/        # auth, rag, mindmap, summary, podcast, flashcards, presentation
 └── schemas.py      # Pydantic-модели
 ```
 
@@ -156,18 +158,18 @@ curl http://localhost:8000/api/jacobs/auth/status
 
 ---
 
-### RAG — `/api/rag`
+### RAG — `/api/jacobs/rag`
 
 | Метод | URL | Описание |
 |-------|-----|----------|
-| POST | `/api/rag/ingest` | Загрузка и индексация документов |
-| POST | `/api/rag/retrieve` | Поиск релевантных чанков |
-| POST | `/api/rag/ask` | Поиск + ответ LLM |
+| POST | `/api/jacobs/rag/ingest` | Загрузка и индексация документов |
+| POST | `/api/jacobs/rag/retrieve` | Поиск релевантных чанков |
+| POST | `/api/jacobs/rag/ask` | Поиск + ответ LLM |
 
 #### Индексация документов
 
 ```bash
-curl -X POST http://localhost:8000/api/rag/ingest \
+curl -X POST http://localhost:8000/api/jacobs/rag/ingest \
   -F "files=@document.pdf" \
   -F "files=@notes.txt" \
   -F "collection=docs_ci" \
@@ -195,7 +197,7 @@ curl -X POST http://localhost:8000/api/rag/ingest \
 #### Поиск чанков
 
 ```bash
-curl -X POST http://localhost:8000/api/rag/retrieve \
+curl -X POST http://localhost:8000/api/jacobs/rag/retrieve \
   -H "Content-Type: application/json" \
   -d '{
     "query": "Какие инвестиционные программы доступны?",
@@ -240,7 +242,7 @@ curl -X POST http://localhost:8000/api/rag/retrieve \
 #### Вопрос-ответ (RAG + LLM)
 
 ```bash
-curl -X POST http://localhost:8000/api/rag/ask \
+curl -X POST http://localhost:8000/api/jacobs/rag/ask \
   -H "Content-Type: application/json" \
   -d '{
     "query": "Какие инвестиционные программы доступны?",
@@ -266,18 +268,18 @@ curl -X POST http://localhost:8000/api/rag/ask \
 
 ---
 
-### Mind Map — `/api/mindmap`
+### Mind Map — `/api/jacobs/mindmap`
 
 | Метод | URL | Описание |
 |-------|-----|----------|
-| POST | `/api/mindmap/text` | Mind map из текста |
-| POST | `/api/mindmap/file` | Mind map из файла |
-| POST | `/api/mindmap/query` | Mind map из RAG-поиска |
+| POST | `/api/jacobs/mindmap/text` | Mind map из текста |
+| POST | `/api/jacobs/mindmap/file` | Mind map из файла |
+| POST | `/api/jacobs/mindmap/query` | Mind map из RAG-поиска |
 
 #### Из текста
 
 ```bash
-curl -X POST http://localhost:8000/api/mindmap/text \
+curl -X POST http://localhost:8000/api/jacobs/mindmap/text \
   -H "Content-Type: application/json" \
   -d '{
     "text": "Центр Инвест — крупнейший банк юга России. Банк предоставляет кредиты, вклады и инвестиционные услуги. Кредитование малого бизнеса является приоритетным направлением.",
@@ -324,7 +326,7 @@ curl -X POST http://localhost:8000/api/mindmap/text \
 #### Из файла
 
 ```bash
-curl -X POST http://localhost:8000/api/mindmap/file \
+curl -X POST http://localhost:8000/api/jacobs/mindmap/file \
   -F "file=@document.pdf" \
   -F "top_concepts=20" \
   -F "min_freq=2" \
@@ -334,7 +336,7 @@ curl -X POST http://localhost:8000/api/mindmap/file \
 #### Из RAG-запроса
 
 ```bash
-curl -X POST http://localhost:8000/api/mindmap/query \
+curl -X POST http://localhost:8000/api/jacobs/mindmap/query \
   -H "Content-Type: application/json" \
   -d '{
     "query": "инвестиционные программы",
@@ -352,18 +354,18 @@ curl -X POST http://localhost:8000/api/mindmap/query \
 
 ---
 
-### Summary — `/api/summary`
+### Summary — `/api/jacobs/summary`
 
 | Метод | URL | Описание |
 |-------|-----|----------|
-| POST | `/api/summary/text` | Суммаризация из текста |
-| POST | `/api/summary/file` | Суммаризация из файла |
-| POST | `/api/summary/query` | Суммаризация из RAG-поиска |
+| POST | `/api/jacobs/summary/text` | Суммаризация из текста |
+| POST | `/api/jacobs/summary/file` | Суммаризация из файла |
+| POST | `/api/jacobs/summary/query` | Суммаризация из RAG-поиска |
 
 #### Из текста
 
 ```bash
-curl -X POST http://localhost:8000/api/summary/text \
+curl -X POST http://localhost:8000/api/jacobs/summary/text \
   -H "Content-Type: application/json" \
   -d '{
     "text": "Длинный текст для суммаризации...",
@@ -391,7 +393,7 @@ curl -X POST http://localhost:8000/api/summary/text \
 #### Из файла
 
 ```bash
-curl -X POST http://localhost:8000/api/summary/file \
+curl -X POST http://localhost:8000/api/jacobs/summary/file \
   -F "file=@document.pdf" \
   -F "topic=Финансы" \
   -F "max_sentences=10"
@@ -400,7 +402,7 @@ curl -X POST http://localhost:8000/api/summary/file \
 #### Из RAG-запроса
 
 ```bash
-curl -X POST http://localhost:8000/api/summary/query \
+curl -X POST http://localhost:8000/api/jacobs/summary/query \
   -H "Content-Type: application/json" \
   -d '{
     "query": "инвестиционные программы",
@@ -413,19 +415,19 @@ curl -X POST http://localhost:8000/api/summary/query \
 
 ---
 
-### Podcast — `/api/podcast`
+### Podcast — `/api/jacobs/podcast`
 
 | Метод | URL | Описание |
 |-------|-----|----------|
-| POST | `/api/podcast/text` | Подкаст из текста |
-| POST | `/api/podcast/file` | Подкаст из файла |
-| POST | `/api/podcast/query` | Подкаст из RAG-поиска |
-| GET | `/api/podcast/audio/{filename}` | Скачать аудиофайл |
+| POST | `/api/jacobs/podcast/text` | Подкаст из текста |
+| POST | `/api/jacobs/podcast/file` | Подкаст из файла |
+| POST | `/api/jacobs/podcast/query` | Подкаст из RAG-поиска |
+| GET | `/api/jacobs/podcast/audio/{filename}` | Скачать аудиофайл |
 
 #### Из текста
 
 ```bash
-curl -X POST http://localhost:8000/api/podcast/text \
+curl -X POST http://localhost:8000/api/jacobs/podcast/text \
   -H "Content-Type: application/json" \
   -d '{
     "text": "Текст для генерации подкаста...",
@@ -449,7 +451,7 @@ curl -X POST http://localhost:8000/api/podcast/text \
   "source": "text",
   "model": "gpt-oss-20b",
   "has_audio": true,
-  "audio_url": "/api/podcast/audio/podcast_a1b2c3d4e5f6.wav",
+  "audio_url": "/api/jacobs/podcast/audio/podcast_a1b2c3d4e5f6.wav",
   "meta": {}
 }
 ```
@@ -457,7 +459,7 @@ curl -X POST http://localhost:8000/api/podcast/text \
 #### Из файла
 
 ```bash
-curl -X POST http://localhost:8000/api/podcast/file \
+curl -X POST http://localhost:8000/api/jacobs/podcast/file \
   -F "file=@document.pdf" \
   -F "topic=Финансы" \
   -F "tone=everyday" \
@@ -467,7 +469,7 @@ curl -X POST http://localhost:8000/api/podcast/file \
 #### Из RAG-запроса
 
 ```bash
-curl -X POST http://localhost:8000/api/podcast/query \
+curl -X POST http://localhost:8000/api/jacobs/podcast/query \
   -H "Content-Type: application/json" \
   -d '{
     "query": "инвестиционные программы",
@@ -482,7 +484,99 @@ curl -X POST http://localhost:8000/api/podcast/query \
 #### Скачать аудио
 
 ```bash
-curl -O http://localhost:8000/api/podcast/audio/podcast_a1b2c3d4e5f6.wav
+curl -O http://localhost:8000/api/jacobs/podcast/audio/podcast_a1b2c3d4e5f6.wav
+```
+
+---
+
+### Flashcards — `/api/jacobs/flashcards`
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| POST | `/api/jacobs/flashcards/file` | Генерация карточек и тестов из файла |
+
+#### Из файла
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/flashcards/file \
+  -F "file=@document.pdf" \
+  -F "topic=Инвестиции" \
+  -F "cards_count=10" \
+  -F "tests_count=5"
+```
+
+Параметры:
+- `file` — файл (PDF/DOCX/TXT)
+- `topic` — тема (по умолчанию "Без названия")
+- `cards_count` — количество карточек (1–50, по умолчанию 10)
+- `tests_count` — количество тестов (1–30, по умолчанию 5)
+
+**Ответ:**
+```json
+{
+  "topic": "Инвестиции",
+  "flashcards": [
+    {"question": "Что такое RAG?", "answer": "Retrieval-Augmented Generation..."}
+  ],
+  "tests": [
+    {
+      "question": "Какой метод используется для поиска?",
+      "options": ["BM25", "TF-IDF", "Dense", "Все перечисленные"],
+      "correct_index": 3,
+      "explanation": "Используется гибридный подход..."
+    }
+  ],
+  "model": "gpt-oss-20b",
+  "meta": {"filename": "document.pdf"}
+}
+```
+
+---
+
+### Presentation — `/api/jacobs/presentation`
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| POST | `/api/jacobs/presentation/generate` | Генерация PPTX из RAG-запроса |
+| GET | `/api/jacobs/presentation/download/{filename}` | Скачать презентацию |
+
+#### Генерация презентации
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/presentation/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Подготовка к собеседованию",
+    "top_k": 8,
+    "max_slides": 6
+  }'
+```
+
+Параметры:
+- `query` — запрос для поиска в RAG
+- `collection` — коллекция Qdrant (опционально)
+- `top_k` — кол-во чанков для контекста (по умолчанию 8)
+- `max_slides` — макс. слайдов (1–20, по умолчанию 6)
+- `model` — модель LLM (опционально)
+
+**Ответ:**
+```json
+{
+  "title": "Подготовка к онлайн-собеседованию",
+  "slides_count": 4,
+  "download_url": "/api/jacobs/presentation/download/presentation_20260321_083308.pptx",
+  "meta": {
+    "title": "...",
+    "slides_count": 4,
+    "path": "/app/data/presentations/presentation_20260321_083308.pptx"
+  }
+}
+```
+
+#### Скачать презентацию
+
+```bash
+curl -O http://localhost:8000/api/jacobs/presentation/download/presentation_20260321_083308.pptx
 ```
 
 ---
@@ -514,37 +608,42 @@ curl http://localhost:8000/api/jacobs/auth/me \
   -H "Authorization: Bearer $TOKEN"
 
 # 5. Индексация документа
-curl -X POST http://localhost:8000/api/rag/ingest \
+curl -X POST http://localhost:8000/api/jacobs/rag/ingest \
   -F "files=@your_document.pdf"
 
-# 6. Поиск
-curl -X POST http://localhost:8000/api/rag/retrieve \
+# 6. Вопрос-ответ через RAG
+curl -X POST http://localhost:8000/api/jacobs/rag/ask \
   -H "Content-Type: application/json" \
   -d '{"query": "ваш вопрос"}'
 
-# 7. Вопрос-ответ
-curl -X POST http://localhost:8000/api/rag/ask \
-  -H "Content-Type: application/json" \
-  -d '{"query": "ваш вопрос"}'
+# 7. Суммаризация файла
+curl -X POST http://localhost:8000/api/jacobs/summary/file \
+  -F "file=@your_document.pdf" \
+  -F "topic=Тема" \
+  -F "max_sentences=5"
 
-# 8. Mind map из текста
-curl -X POST http://localhost:8000/api/mindmap/text \
-  -H "Content-Type: application/json" \
-  -d '{"text": "ваш текст для анализа..."}'
+# 8. Подкаст из файла
+curl -X POST http://localhost:8000/api/jacobs/podcast/file \
+  -F "file=@your_document.pdf" \
+  -F "topic=Тема" \
+  -F "tone=scientific" \
+  -F "pace=normal"
 
-# 9. Mind map из файла
-curl -X POST http://localhost:8000/api/mindmap/file \
+# 9. Flashcards из файла
+curl -X POST http://localhost:8000/api/jacobs/flashcards/file \
+  -F "file=@your_document.pdf" \
+  -F "topic=Тема" \
+  -F "cards_count=10" \
+  -F "tests_count=5"
+
+# 10. Презентация из RAG
+curl -X POST http://localhost:8000/api/jacobs/presentation/generate \
+  -H "Content-Type: application/json" \
+  -d '{"query": "ваш запрос", "max_slides": 6}'
+
+# 11. Mind map из файла
+curl -X POST http://localhost:8000/api/jacobs/mindmap/file \
   -F "file=@your_document.pdf"
-
-# 10. Суммаризация текста
-curl -X POST http://localhost:8000/api/summary/text \
-  -H "Content-Type: application/json" \
-  -d '{"text": "ваш текст...", "topic": "Тема", "max_sentences": 5}'
-
-# 11. Подкаст из текста
-curl -X POST http://localhost:8000/api/podcast/text \
-  -H "Content-Type: application/json" \
-  -d '{"text": "ваш текст...", "topic": "Тема", "tone": "scientific", "pace": "normal"}'
 ```
 
 ---
@@ -596,5 +695,7 @@ docker compose down              # остановка
 - **RAG:** Qdrant, fastembed, BM25 rerank, OpenAI-compatible LLM
 - **Mind Map:** TF + co-occurrence graph, vis-network
 - **Summary:** Суммаризация через LLM
-- **Podcast:** Генерация диалога + TTS (pyttsx3/espeak)
+- **Podcast:** Генерация диалога + TTS (Silero, 5 голосов: aidar, baya, eugene, kseniya, xenia)
+- **Flashcards:** Генерация карточек и тестов через LLM
+- **Presentation:** Генерация PPTX презентаций через LLM + python-pptx
 - **Infra:** Docker Compose, PostgreSQL, Qdrant

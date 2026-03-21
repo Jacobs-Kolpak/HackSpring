@@ -10,6 +10,7 @@ from backend.routers.flashcards import router as flashcards_router
 from backend.routers.mindmap import router as mindmap_router
 from backend.routers.podcast import router as podcast_router
 from backend.routers.rag import router as rag_router
+from backend.routers.presentation import router as presentation_router
 from backend.routers.summary import router as summary_router
 
 logging.basicConfig(level=settings.LOG_LEVEL, format=settings.LOG_FORMAT)
@@ -38,6 +39,7 @@ app.include_router(mindmap_router)
 app.include_router(summary_router)
 app.include_router(podcast_router)
 app.include_router(flashcards_router)
+app.include_router(presentation_router)
 
 
 @app.get("/")
