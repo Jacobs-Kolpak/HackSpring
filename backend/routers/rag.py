@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from backend.services import presentation as presentation_service
 from backend.services import rag as rag_service
 from backend.utils.document_reader import SUPPORTED_EXTENSIONS
 
@@ -36,6 +38,14 @@ class AskRequest(RetrieveRequest):
     model: Optional[str] = None
 
 
+class PresentationRequest(RetrieveRequest):
+    """Запрос на генерацию презентации из RAG-источников."""
+
+    model: Optional[str] = None
+    max_slides: Optional[int] = Field(default=None, ge=2, le=30)
+    filename_prefix: Optional[str] = None
+
+
 class RetrieveResponse(BaseModel):
     """Результаты поиска."""
 
@@ -60,6 +70,16 @@ class IngestResponse(BaseModel):
     indexed_files: int
     inserted_chunks: int
     collection: str
+
+
+class PresentationMetaResponse(BaseModel):
+    """Метаданные сгенерированной презентации."""
+
+    query: str
+    title: str
+    slides: int
+    used_chunks: int
+    file_path: str
 
 
 # ── Endpoints ───────────────────────────────────────────────
@@ -144,4 +164,67 @@ async def ask(payload: AskRequest) -> AskResponse:
         model=model,
         used_chunks=len(results),
         results=results,
+    )
+
+
+@router.post(
+    "/presentation",
+    response_model=PresentationMetaResponse,
+)
+async def create_presentation(payload: PresentationRequest) -> PresentationMetaResponse:
+    """Генерирует презентацию и возвращает метаданные файла."""
+    results = rag_service.retrieve(
+        query=payload.query,
+        collection=payload.collection,
+        top_k=payload.top_k,
+        fetch_k=payload.fetch_k,
+        min_score=payload.min_score,
+        dense_weight=payload.dense_weight,
+        source_name=payload.source_name,
+    )
+    if not results:
+        raise HTTPException(status_code=404, detail="No relevant chunks found")
+
+    from backend.core.config import settings  # pylint: disable=import-outside-toplevel
+
+    model = payload.model or settings.llm.model
+    try:
+        file_path, metadata = presentation_service.generate_presentation(
+            query=payload.query,
+            results=results,
+            model=model,
+            max_slides=payload.max_slides,
+            filename_prefix=payload.filename_prefix,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return PresentationMetaResponse(
+        query=payload.query,
+        title=str(metadata["title"]),
+        slides=int(metadata["slides"]),
+        used_chunks=len(results),
+        file_path=str(file_path),
+    )
+
+
+@router.get("/presentation/download")
+async def download_presentation(file_path: str) -> FileResponse:
+    """Скачивает ранее сгенерированный файл презентации."""
+    path = Path(file_path).resolve()
+    from backend.core.config import settings  # pylint: disable=import-outside-toplevel
+
+    allowed_root = Path(settings.presentation.output_dir).resolve()
+    if allowed_root not in path.parents:
+        raise HTTPException(status_code=403, detail="Access to file is forbidden")
+    if not path.exists() or not path.is_file() or path.suffix.lower() != ".pptx":
+        raise HTTPException(status_code=404, detail="Presentation file not found")
+    return FileResponse(
+        path=str(path),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        ),
+        filename=path.name,
     )

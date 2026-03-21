@@ -163,6 +163,8 @@ curl http://localhost:8000/api/jacobs/auth/status
 | POST | `/api/rag/ingest` | Загрузка и индексация документов |
 | POST | `/api/rag/retrieve` | Поиск релевантных чанков |
 | POST | `/api/rag/ask` | Поиск + ответ LLM |
+| POST | `/api/rag/presentation` | Генерация презентации из RAG-источников |
+| GET | `/api/rag/presentation/download` | Скачивание ранее сгенерированного `.pptx` |
 
 #### Индексация документов
 
@@ -235,6 +237,39 @@ curl -X POST http://localhost:8000/api/rag/retrieve \
     }
   ]
 }
+```
+
+#### Генерация презентации (RAG -> PPTX)
+
+```bash
+curl -X POST http://localhost:8000/api/rag/presentation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Сделай презентацию по ключевым рискам проекта",
+    "collection": "docs_ci",
+    "top_k": 8,
+    "max_slides": 8,
+    "model": "gpt-oss-20b",
+    "filename_prefix": "risk_overview"
+  }'
+```
+
+**Ответ:**
+```json
+{
+  "query": "Сделай презентацию по ключевым рискам проекта",
+  "title": "Ключевые риски проекта",
+  "slides": 10,
+  "used_chunks": 8,
+  "file_path": "/abs/path/data/presentations/risk_overview_20260321_120000.pptx"
+}
+```
+
+Скачать результат:
+
+```bash
+curl -L "http://localhost:8000/api/rag/presentation/download?file_path=/abs/path/data/presentations/risk_overview_20260321_120000.pptx" \
+  -o risk_overview.pptx
 ```
 
 #### Вопрос-ответ (RAG + LLM)
@@ -413,11 +448,11 @@ curl -X POST http://localhost:8000/api/mindmap/file \
 | `DATABASE_URL` | PostgreSQL connection string | — |
 | `SECRET_KEY` | Ключ для JWT | — |
 | `LLM_MODEL` | Модель LLM | `gpt-oss-20b` |
-| `LLM_BASE_URL` | URL LLM API | `https://hackai.centrinvest.ru:6630` |
-| `LLM_API_KEY` | API ключ LLM | `hackaton2026` |
+| `LLM_BASE_URL` | URL LLM API | `http://your-llm-host:6630` |
+| `LLM_API_KEY` | API ключ LLM | `set in private .env` |
 | `RAG_EMBEDDINGS_MODEL` | Модель эмбеддингов | `Qwen3-Embedding-0.6B` |
-| `RAG_EMBEDDER_URL` | URL embeddings API | `https://hackai.centrinvest.ru:6620` |
-| `RAG_EMBEDDER_API_KEY` | API ключ эмбеддингов | `hackaton2026` |
+| `RAG_EMBEDDER_URL` | URL embeddings API | `http://your-embedder-host:6620` |
+| `RAG_EMBEDDER_API_KEY` | API ключ эмбеддингов | `set in private .env` |
 | `RAG_COLLECTION` | Коллекция Qdrant | `docs_ci` |
 | `RAG_CHUNK_SIZE` | Размер чанка | `900` |
 | `RAG_CHUNK_OVERLAP` | Перекрытие чанков | `180` |

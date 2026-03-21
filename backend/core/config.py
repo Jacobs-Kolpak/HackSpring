@@ -25,7 +25,7 @@ class LLMSettings(BaseSettings):
     provider: str = "openai"
     api_key: str = ""
     model: str = "gpt-oss-20b"
-    base_url: str = "https://hackai.centrinvest.ru:6630"
+    base_url: str = "http://localhost:6630"
     temperature: float = 0.7
     max_tokens: int = 4096
 
@@ -84,6 +84,17 @@ class UploadSettings(BaseSettings):
         return self.max_size_mb * 1024 * 1024
 
 
+class PresentationSettings(BaseSettings):
+    """Настройки генерации презентаций."""
+
+    model_config = SettingsConfigDict(env_prefix="PRESENTATION_", extra="ignore")
+
+    output_dir: str = str(BASE_DIR / "data" / "presentations")
+    default_max_slides: int = 8
+    max_slides_limit: int = 15
+    max_bullets_per_slide: int = 5
+
+
 # ── Главный Settings ────────────────────────────────────────
 
 
@@ -138,6 +149,11 @@ class Settings(BaseSettings):
     def upload(self) -> UploadSettings:
         """Настройки загрузки файлов."""
         return UploadSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
+
+    @cached_property
+    def presentation(self) -> PresentationSettings:
+        """Настройки презентаций."""
+        return PresentationSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
 
 settings = Settings()

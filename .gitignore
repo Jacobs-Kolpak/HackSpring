@@ -1,7 +1,25 @@
 .idea/
+.vscode/
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.swp
+*.swo
+.DS_Store
+
+# Python caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local databases / logs
+*.db
+*.sqlite3
+*.log
 
 # Секреты — никогда не коммитим
 .env
@@ -10,3 +28,6 @@ __pycache__/
 # Данные проекта (генерируются локально)
 data/
 docs
+
+# Generated presentations / artifacts
+*.pptx
