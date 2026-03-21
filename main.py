@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.core.config import settings
 from backend.core.database import Base, engine
 from backend.routers.auth import router as auth_router
+from backend.routers.flashcards import router as flashcards_router
 from backend.routers.mindmap import router as mindmap_router
 from backend.routers.podcast import router as podcast_router
 from backend.routers.rag import router as rag_router
@@ -36,6 +37,7 @@ app.include_router(rag_router)
 app.include_router(mindmap_router)
 app.include_router(summary_router)
 app.include_router(podcast_router)
+app.include_router(flashcards_router)
 
 
 @app.get("/")

@@ -3,41 +3,19 @@ from __future__ import annotations
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from backend.services import podcast as podcast_service
-from backend.services import rag as rag_service
 from backend.services.podcast import PodcastConfig, normalize_pace, normalize_tone
 from backend.utils.document_reader import SUPPORTED_EXTENSIONS, read_document
 
-router = APIRouter(prefix="/api/podcast", tags=["Podcast"])
+router = APIRouter(prefix="/api/jacobs/podcast", tags=["Podcast"])
 
 _AUDIO_DIR = Path("data/audio")
-
-
-class TextPodcastRequest(BaseModel):
-    text: str = Field(..., min_length=1)
-    topic: str = Field(default="Без названия")
-    tone: str = Field(default="scientific")
-    pace: str = Field(default="normal")
-    model: Optional[str] = None
-
-
-class QueryPodcastRequest(BaseModel):
-    query: str = Field(..., min_length=1)
-    collection: Optional[str] = None
-    top_k: int = Field(default=8, ge=1, le=50)
-    min_score: float = Field(default=0.15, ge=0.0, le=1.0)
-    dense_weight: float = Field(default=0.6, ge=0.0, le=1.0)
-    source_name: Optional[str] = None
-    topic: str = Field(default="Без названия")
-    tone: str = Field(default="scientific")
-    pace: str = Field(default="normal")
-    model: Optional[str] = None
 
 
 class DialogueResponse(BaseModel):
@@ -64,32 +42,8 @@ def _try_audio(dialogue: str, pace: str) -> tuple[bool, Optional[str]]:
         dialogue, audio_path, pace=normalize_pace(pace)
     )
     if ok:
-        return True, f"/api/podcast/audio/{filename}"
+        return True, f"/api/jacobs/podcast/audio/{filename}"
     return False, None
-
-
-@router.post("/text", response_model=DialogueResponse)
-async def from_text(payload: TextPodcastRequest) -> DialogueResponse:
-    try:
-        cfg = _make_config(payload.tone, payload.pace)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    from backend.core.config import settings  # pylint: disable=import-outside-toplevel
-
-    model = payload.model or settings.llm.model
-    dialogue = podcast_service.generate_dialogue(
-        payload.text, topic=payload.topic, config=cfg, model=model
-    )
-    has_audio, audio_url = _try_audio(dialogue, payload.pace)
-
-    return DialogueResponse(
-        dialogue=dialogue,
-        source="text",
-        model=model,
-        has_audio=has_audio,
-        audio_url=audio_url,
-    )
 
 
 @router.post("/file", response_model=DialogueResponse)
@@ -120,7 +74,7 @@ async def from_file(
     if not text.strip():
         raise HTTPException(status_code=400, detail="В файле нет текста")
 
-    from backend.core.config import settings  # pylint: disable=import-outside-toplevel
+    from backend.core.config import settings
 
     used_model = model or settings.llm.model
     dialogue = podcast_service.generate_dialogue(
@@ -135,44 +89,6 @@ async def from_file(
         has_audio=has_audio,
         audio_url=audio_url,
         meta={"filename": file.filename},
-    )
-
-
-@router.post("/query", response_model=DialogueResponse)
-async def from_query(payload: QueryPodcastRequest) -> DialogueResponse:
-    try:
-        cfg = _make_config(payload.tone, payload.pace)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    results: List[Dict[str, Any]] = rag_service.retrieve(
-        query=payload.query,
-        collection=payload.collection,
-        top_k=payload.top_k,
-        min_score=payload.min_score,
-        dense_weight=payload.dense_weight,
-        source_name=payload.source_name,
-    )
-    if not results:
-        raise HTTPException(status_code=404, detail="Релевантных чанков не найдено")
-
-    text = "\n\n".join(r["text"] for r in results if r.get("text"))
-
-    from backend.core.config import settings  # pylint: disable=import-outside-toplevel
-
-    used_model = payload.model or settings.llm.model
-    dialogue = podcast_service.generate_dialogue(
-        text, topic=payload.topic, config=cfg, model=used_model
-    )
-    has_audio, audio_url = _try_audio(dialogue, payload.pace)
-
-    return DialogueResponse(
-        dialogue=dialogue,
-        source="query",
-        model=used_model,
-        has_audio=has_audio,
-        audio_url=audio_url,
-        meta={"query": payload.query, "used_chunks": len(results)},
     )
 
 

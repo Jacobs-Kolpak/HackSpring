@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from backend.services import rag as rag_service
 from backend.utils.document_reader import SUPPORTED_EXTENSIONS
 
-router = APIRouter(prefix="/api/rag", tags=["RAG"])
+router = APIRouter(prefix="/api/jacobs/rag", tags=["RAG"])
 
 
 class RetrieveRequest(BaseModel):
