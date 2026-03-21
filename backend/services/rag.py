@@ -52,13 +52,19 @@ def ingest(
     collection: Optional[str] = None,
     chunk_size: int = 0,
     chunk_overlap: int = 0,
+    source_name_overrides: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     rag = settings.rag
     col = collection or rag.collection
     size = chunk_size if chunk_size > 0 else rag.chunk_size
     overlap = chunk_overlap if chunk_overlap > 0 else rag.chunk_overlap
 
-    chunks = build_chunks(paths, size=size, overlap=overlap)
+    chunks = build_chunks(
+        paths,
+        size=size,
+        overlap=overlap,
+        source_name_overrides=source_name_overrides,
+    )
     if not chunks:
         return {"indexed_files": len(paths), "inserted_chunks": 0, "collection": col}
 
@@ -69,14 +75,16 @@ def ingest(
     client = _get_client()
     _ensure_collection(client, col, len(sample))
 
-    for src in {c.source_path for c in chunks}:
+    # Удаляем предыдущие версии этих же документов по нормализованному source_name.
+    # Иначе при загрузке через временные файлы (`tmp*.pdf`) коллекция зарастает дубликатами.
+    for src_name in {c.source_name for c in chunks}:
         client.delete(
             collection_name=col,
             points_selector=models.FilterSelector(
                 filter=models.Filter(must=[
                     models.FieldCondition(
-                        key="source_path",
-                        match=models.MatchValue(value=src),
+                        key="source_name",
+                        match=models.MatchValue(value=src_name),
                     )
                 ])
             ),
@@ -169,7 +177,8 @@ def _do_retrieve(
 
     reranked = _api_rerank(query, _hybrid_rerank(query, candidates, params["dw"]))
 
-    results = [r for r in reranked if r["score"] >= params["ms"]][:params["k"]]
+    filtered = [r for r in reranked if r["score"] >= params["ms"]]
+    results = _dedupe_results(filtered, params["k"])
     for idx, item in enumerate(results, 1):
         item["rank"] = idx
     return results
@@ -209,6 +218,8 @@ def _search_qdrant(
         text = str(payload.get("text", ""))
         if not text.strip():
             continue
+        if _is_low_signal_chunk(text):
+            continue
         results.append({
             "rank": 0,
             "dense_score_raw": float(hit.score),
@@ -223,6 +234,48 @@ def _search_qdrant(
 
 def _tokenize(text: str) -> List[str]:
     return [t for t in re.findall(r"[a-zа-яё0-9]+", text.lower()) if len(t) > 1]
+
+
+def _is_low_signal_chunk(text: str) -> bool:
+    clean = text.strip()
+    if not clean:
+        return True
+    if len(clean) < 120:
+        return True
+    lines = [ln.strip() for ln in clean.splitlines() if ln.strip()]
+    if not lines:
+        return True
+
+    toc_like = sum(1 for ln in lines if re.search(r"\.{4,}\s*\d{1,3}\s*$", ln))
+    numeric_only = sum(1 for ln in lines if re.fullmatch(r"\d{1,3}", ln))
+    if toc_like >= 2 or (toc_like + numeric_only) >= max(3, len(lines) // 2):
+        return True
+
+    weird_tokens = re.findall(r"[а-яёa-z]{1,3}э[а-яёa-z]{1,3}", clean.lower())
+    if len(weird_tokens) >= 3 and len(_tokenize(clean)) < 80:
+        return True
+    return False
+
+
+def _text_signature(text: str, max_chars: int = 800) -> str:
+    clean = re.sub(r"\s+", " ", text.strip().lower())
+    if len(clean) > max_chars:
+        clean = clean[:max_chars]
+    return clean
+
+
+def _dedupe_results(rows: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+    seen_text: set[str] = set()
+    deduped: List[Dict[str, Any]] = []
+    for item in rows:
+        sig = _text_signature(str(item.get("text", "")))
+        if not sig or sig in seen_text:
+            continue
+        seen_text.add(sig)
+        deduped.append(item)
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 def _minmax(values: Sequence[float]) -> List[float]:

@@ -69,6 +69,17 @@ class UploadSettings(BaseSettings):
         return self.max_size_mb * 1024 * 1024
 
 
+class InfographicSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="INFOGRAPHIC_", extra="ignore")
+
+    output_dir: str = str(BASE_DIR / "data" / "infographics")
+    default_max_topics: int = 6
+    max_topics_limit: int = 12
+    models: str = ""
+    auto_discover_models: bool = True
+    max_model_candidates: int = 8
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
@@ -113,6 +124,10 @@ class Settings(BaseSettings):
     @cached_property
     def upload(self) -> UploadSettings:
         return UploadSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
+
+    @cached_property
+    def infographic(self) -> InfographicSettings:
+        return InfographicSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
 
 settings = Settings()

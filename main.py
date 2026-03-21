@@ -7,6 +7,7 @@ from backend.core.config import settings
 from backend.core.database import Base, engine
 from backend.routers.auth import router as auth_router
 from backend.routers.flashcards import router as flashcards_router
+from backend.routers.infographics import router as infographics_router
 from backend.routers.mindmap import router as mindmap_router
 from backend.routers.podcast import router as podcast_router
 from backend.routers.rag import router as rag_router
@@ -34,6 +35,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/jacobs/auth")
 app.include_router(rag_router)
+app.include_router(infographics_router)
 app.include_router(mindmap_router)
 app.include_router(summary_router)
 app.include_router(podcast_router)

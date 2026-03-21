@@ -55,6 +55,7 @@ async def ingest_files(
     chunk_overlap: int = Form(0),
 ) -> IngestResponse:
     temp_paths: List[Path] = []
+    source_name_overrides: Dict[str, str] = {}
     try:
         for upload in files:
             ext = Path(upload.filename or "").suffix.lower()
@@ -65,13 +66,18 @@ async def ingest_files(
                 )
             with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                 tmp.write(await upload.read())
-                temp_paths.append(Path(tmp.name))
+                temp_path = Path(tmp.name)
+                temp_paths.append(temp_path)
+                original_name = Path(upload.filename or "").name.strip()
+                if original_name:
+                    source_name_overrides[str(temp_path.resolve())] = original_name
 
         result = rag_service.ingest(
             paths=temp_paths,
             collection=collection,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            source_name_overrides=source_name_overrides,
         )
         if result["inserted_chunks"] == 0:
             raise HTTPException(status_code=400, detail="No text extracted")

@@ -156,18 +156,20 @@ curl http://localhost:8000/api/jacobs/auth/status
 
 ---
 
-### RAG — `/api/rag`
+### RAG — `/api/jacobs/rag`
 
 | Метод | URL | Описание |
 |-------|-----|----------|
-| POST | `/api/rag/ingest` | Загрузка и индексация документов |
-| POST | `/api/rag/retrieve` | Поиск релевантных чанков |
-| POST | `/api/rag/ask` | Поиск + ответ LLM |
+| POST | `/api/jacobs/rag/ingest` | Загрузка и индексация документов |
+| POST | `/api/jacobs/rag/retrieve` | Поиск релевантных чанков |
+| POST | `/api/jacobs/rag/ask` | Поиск + ответ LLM |
+| POST | `/api/jacobs/rag/infographic` | Генерация JSON для фронтовой инфографики |
+| GET | `/api/jacobs/rag/infographic/download` | Legacy-скачивание ранее сгенерированных PNG |
 
 #### Индексация документов
 
 ```bash
-curl -X POST http://localhost:8000/api/rag/ingest \
+curl -X POST http://localhost:8000/api/jacobs/rag/ingest \
   -F "files=@document.pdf" \
   -F "files=@notes.txt" \
   -F "collection=docs_ci" \
@@ -195,7 +197,7 @@ curl -X POST http://localhost:8000/api/rag/ingest \
 #### Поиск чанков
 
 ```bash
-curl -X POST http://localhost:8000/api/rag/retrieve \
+curl -X POST http://localhost:8000/api/jacobs/rag/retrieve \
   -H "Content-Type: application/json" \
   -d '{
     "query": "Какие инвестиционные программы доступны?",
@@ -240,7 +242,7 @@ curl -X POST http://localhost:8000/api/rag/retrieve \
 #### Вопрос-ответ (RAG + LLM)
 
 ```bash
-curl -X POST http://localhost:8000/api/rag/ask \
+curl -X POST http://localhost:8000/api/jacobs/rag/ask \
   -H "Content-Type: application/json" \
   -d '{
     "query": "Какие инвестиционные программы доступны?",
@@ -252,6 +254,81 @@ curl -X POST http://localhost:8000/api/rag/ask \
 ```
 
 Параметры: все из `/retrieve` + `model` (опционально, по умолчанию из `.env`).
+
+#### Инфографика (RAG -> JSON для фронта)
+
+```bash
+curl -X POST http://localhost:8000/api/jacobs/rag/infographic \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Сделай инфографику по ключевым темам документа",
+    "collection": "docs_ci",
+    "top_k": 8,
+    "max_topics": 6,
+    "model": "gpt-oss-20b,qwen2.5-72b-instruct"
+  }'
+```
+
+**Ответ:**
+```json
+{
+  "query": "Сделай инфографику по ключевым темам документа",
+  "title": "Ключевые темы документа и динамика релевантности",
+  "subtitle": "Сводка по retrieval-контексту",
+  "metrics": [
+    {
+      "id": "metric-1",
+      "name": "Использовано чанков",
+      "value": 8,
+      "unit": "шт",
+      "description": "Количество фрагментов, попавших в анализ инфографики."
+    }
+  ],
+  "bar_chart": {
+    "title": "Вклад источников",
+    "x_axis_label": "Источник",
+    "y_axis_label": "Доля релевантности, %",
+    "legend": "Суммарный вклад источника в итоговый score",
+    "data": [
+      { "id": "bar-1", "name": "Документ 1", "value": 34.5 }
+    ]
+  },
+  "pie_chart": {
+    "title": "Распределение ключевых тем",
+    "legend": "Доля упоминаний по категориям",
+    "data": [
+      { "id": "pie-1", "name": "Категория A", "value": 35.0 }
+    ]
+  },
+  "line_chart": {
+    "title": "Динамика релевантности",
+    "x_axis_label": "Позиция чанка",
+    "y_axis_label": "Score, %",
+    "legend": "Изменение релевантности по ранжированному списку",
+    "data": [
+      { "id": "line-1", "name": "Чанк 1", "value": 82.3 }
+    ]
+  },
+  "key_insights": [
+    "Лидирующий источник формирует треть суммарной релевантности."
+  ],
+  "used_chunks": 8,
+  "models_used": ["gpt-oss-20b", "qwen2.5-72b-instruct"],
+  "failed_models": [],
+  "download": {
+    "mime_type": "image/png",
+    "strategy": "frontend",
+    "hint": "PNG формируется на фронтенде из этого JSON и скачивается в браузере."
+  }
+}
+```
+
+Legacy PNG-скачивание (если файл уже существует на диске):
+
+```bash
+curl -L "http://localhost:8000/api/jacobs/rag/infographic/download?file_path=/abs/path/data/infographics/math84_infographic_20260321_120000.png" \
+  -o math84_infographic.png
+```
 
 **Ответ:**
 ```json
@@ -558,11 +635,11 @@ curl -X POST http://localhost:8000/api/podcast/text \
 | `DATABASE_URL` | PostgreSQL connection string | — |
 | `SECRET_KEY` | Ключ для JWT | — |
 | `LLM_MODEL` | Модель LLM | `gpt-oss-20b` |
-| `LLM_BASE_URL` | URL LLM API | `https://hackai.centrinvest.ru:6630` |
-| `LLM_API_KEY` | API ключ LLM | `hackaton2026` |
+| `LLM_BASE_URL` | URL LLM API | `https://your-llm-host:6630` |
+| `LLM_API_KEY` | API ключ LLM | `set in private .env` |
 | `RAG_EMBEDDINGS_MODEL` | Модель эмбеддингов | `Qwen3-Embedding-0.6B` |
-| `RAG_EMBEDDER_URL` | URL embeddings API | `https://hackai.centrinvest.ru:6620` |
-| `RAG_EMBEDDER_API_KEY` | API ключ эмбеддингов | `hackaton2026` |
+| `RAG_EMBEDDER_URL` | URL embeddings API | `https://your-embedder-host:6620` |
+| `RAG_EMBEDDER_API_KEY` | API ключ эмбеддингов | `set in private .env` |
 | `RAG_COLLECTION` | Коллекция Qdrant | `docs_ci` |
 | `RAG_CHUNK_SIZE` | Размер чанка | `900` |
 | `RAG_CHUNK_OVERLAP` | Перекрытие чанков | `180` |
