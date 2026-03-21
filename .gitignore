@@ -10,3 +10,8 @@ __pycache__/
 # Данные проекта (генерируются локально)
 data/
 docs
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local

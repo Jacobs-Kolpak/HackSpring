@@ -44,6 +44,7 @@ services:
     environment:
       # Переопределяем для Docker-сети (контейнер -> контейнер)
       DATABASE_URL: postgresql://authkeyhub:authkeyhub_secret@db:5432/authkeyhub
+      CORS_ORIGINS: '["*"]'
     depends_on:
       db:
         condition: service_healthy
@@ -51,6 +52,17 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
+
+  # ── Frontend (React + Nginx) ─────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - app
 
 volumes:
   postgres_data:

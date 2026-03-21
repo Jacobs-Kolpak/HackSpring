@@ -7,3 +7,5 @@ __pycache__/
 data/
 RAG/
 *.egg-info/
+frontend/node_modules/
+frontend/dist/
