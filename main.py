@@ -14,6 +14,7 @@ from backend.routers.content.table import router as table_router
 from backend.routers.media.podcast import router as podcast_router
 from backend.routers.media.presentation import router as presentation_router
 from backend.routers.media.infographics import router as infographics_router
+from backend.routers.media.video import router as video_router
 from backend.routers.web.parser import router as parser_router
 
 
@@ -45,6 +46,7 @@ app.include_router(podcast_router)
 app.include_router(flashcards_router)
 app.include_router(presentation_router)
 app.include_router(infographics_router)
+app.include_router(video_router)
 app.include_router(parser_router)
 app.include_router(table_router)
 

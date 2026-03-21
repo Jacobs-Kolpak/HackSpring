@@ -1,59 +1,298 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Video,
-  Play,
-  Pause,
-  Volume2,
   Download,
   Lightbulb,
+  Loader2,
+  AlertCircle,
+  House,
+  Sparkles,
 } from "lucide-react";
+import axios from "axios";
 import { useDocuments } from "../context/DocumentContext";
 import PageClearButton from "../components/PageClearButton";
+import { useNavigate } from "react-router-dom";
+import { API_ROUTES } from "../constants/api";
+import {
+  readSessionState,
+  writeSessionState,
+} from "../utils/sessionState";
+
+interface GeneratedVideo {
+  url: string;
+  filename: string;
+  sourceFileName: string;
+  speaker: string;
+  summaryTemplate: string;
+  maxSentences: number;
+}
+
+const VIDEO_PAGE_STORAGE_KEY = "video_page_state_v1";
+
+const DEFAULT_SPEAKER = "xenia";
+const DEFAULT_SUMMARY_TEMPLATE = "summary";
+const DEFAULT_MAX_SENTENCES = 8;
+const SPEAKER_OPTIONS = [
+  "aidar",
+  "baya",
+  "eugene",
+  "kseniya",
+  "xenia",
+] as const;
+const SUMMARY_TEMPLATE_OPTIONS = [
+  "summary",
+  "executive",
+  "detailed",
+] as const;
+
+const parseErrorBlob = async (blob: Blob): Promise<string | null> => {
+  try {
+    const text = await blob.text();
+    if (!text.trim()) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(text) as {
+        detail?: string;
+        message?: string;
+      };
+      if (typeof parsed.detail === "string") {
+        return parsed.detail;
+      }
+      if (typeof parsed.message === "string") {
+        return parsed.message;
+      }
+    } catch {
+      return text;
+    }
+
+    return text;
+  } catch {
+    return null;
+  }
+};
+
+const extractFilename = (headerValue?: string) => {
+  if (!headerValue) {
+    return "video-summary.mp4";
+  }
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+
+  const asciiMatch = headerValue.match(/filename="?([^";]+)"?/i);
+  if (asciiMatch?.[1]) {
+    return asciiMatch[1];
+  }
+
+  return "video-summary.mp4";
+};
 
 export default function VideoPage() {
-  const { documents } = useDocuments();
+  const navigate = useNavigate();
+  const { documents, uploadedSourceFiles } = useDocuments();
+  const persistedState = readSessionState(
+    VIDEO_PAGE_STORAGE_KEY,
+    {
+      speaker: DEFAULT_SPEAKER,
+      summaryTemplate: DEFAULT_SUMMARY_TEMPLATE,
+      maxSentences: DEFAULT_MAX_SENTENCES,
+      selectedFileName: "",
+      generationError: null as string | null,
+    },
+  );
+
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generated, setGenerated] = useState(false);
-  const [duration, setDuration] = useState(5);
-  const [style, setStyle] = useState<
-    "modern" | "classic" | "minimal"
-  >("modern");
-  const generationTimeoutRef = useRef<number | null>(null);
+  const [speaker, setSpeaker] = useState(persistedState.speaker);
+  const [summaryTemplate, setSummaryTemplate] = useState(
+    persistedState.summaryTemplate,
+  );
+  const [maxSentences, setMaxSentences] = useState(
+    persistedState.maxSentences,
+  );
+  const [selectedFileName, setSelectedFileName] = useState(
+    persistedState.selectedFileName,
+  );
+  const [generatedVideo, setGeneratedVideo] =
+    useState<GeneratedVideo | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(
+    persistedState.generationError,
+  );
+
+  const availableFiles = useMemo(
+    () =>
+      uploadedSourceFiles.filter((file) =>
+        documents.some((doc) => doc.name === file.name),
+      ),
+    [documents, uploadedSourceFiles],
+  );
+
+  const selectedSourceFile = useMemo(() => {
+    if (availableFiles.length === 0) {
+      return null;
+    }
+    return (
+      availableFiles.find(
+        (file) => file.name === selectedFileName,
+      ) || availableFiles[0]
+    );
+  }, [availableFiles, selectedFileName]);
+
+  useEffect(() => {
+    if (availableFiles.length > 0 && !selectedFileName) {
+      setSelectedFileName(availableFiles[0].name);
+    }
+  }, [availableFiles, selectedFileName]);
+
+  useEffect(() => {
+    writeSessionState(VIDEO_PAGE_STORAGE_KEY, {
+      speaker,
+      summaryTemplate,
+      maxSentences,
+      selectedFileName,
+      generationError,
+    });
+  }, [
+    generationError,
+    maxSentences,
+    selectedFileName,
+    speaker,
+    summaryTemplate,
+  ]);
 
   useEffect(() => {
     return () => {
-      if (generationTimeoutRef.current !== null) {
-        window.clearTimeout(generationTimeoutRef.current);
+      if (generatedVideo?.url) {
+        URL.revokeObjectURL(generatedVideo.url);
       }
     };
-  }, []);
+  }, [generatedVideo]);
 
-  const handleGenerate = () => {
-    setIsGenerating(true);
-    if (generationTimeoutRef.current !== null) {
-      window.clearTimeout(generationTimeoutRef.current);
+  const handleGenerate = async () => {
+    if (!selectedSourceFile) {
+      alert(
+        "Исходный файл недоступен в памяти браузера. Загрузите документ заново на главной странице.",
+      );
+      return;
     }
-    generationTimeoutRef.current = window.setTimeout(() => {
+
+    setIsGenerating(true);
+    setGenerationError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedSourceFile);
+      formData.append("speaker", speaker.trim() || DEFAULT_SPEAKER);
+      formData.append(
+        "summary_template",
+        summaryTemplate || DEFAULT_SUMMARY_TEMPLATE,
+      );
+      formData.append(
+        "max_sentences",
+        String(
+          Math.max(1, Math.min(20, Number(maxSentences) || DEFAULT_MAX_SENTENCES)),
+        ),
+      );
+
+      const response = await axios.post(
+        API_ROUTES.VIDEO.GENERATE,
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+          responseType: "blob",
+        },
+      );
+
+      const contentType = response.headers["content-type"] || "";
+      if (!contentType.includes("video/")) {
+        const unexpectedMessage = await parseErrorBlob(
+          response.data,
+        );
+        throw new Error(
+          unexpectedMessage ||
+            "Сервис вернул неожиданный формат ответа вместо видео.",
+        );
+      }
+
+      if (generatedVideo?.url) {
+        URL.revokeObjectURL(generatedVideo.url);
+      }
+
+      const objectUrl = URL.createObjectURL(response.data);
+      setGeneratedVideo({
+        url: objectUrl,
+        filename: extractFilename(
+          response.headers["content-disposition"],
+        ),
+        sourceFileName: selectedSourceFile.name,
+        speaker: speaker.trim() || DEFAULT_SPEAKER,
+        summaryTemplate:
+          summaryTemplate || DEFAULT_SUMMARY_TEMPLATE,
+        maxSentences: Math.max(
+          1,
+          Math.min(20, Number(maxSentences) || DEFAULT_MAX_SENTENCES),
+        ),
+      });
+    } catch (error) {
+      let errorMessage =
+        "Не удалось сгенерировать видео. Проверьте параметры и попробуйте снова.";
+
+      if (axios.isAxiosError(error)) {
+        if (error.response?.data instanceof Blob) {
+          const blobMessage = await parseErrorBlob(
+            error.response.data,
+          );
+          if (blobMessage) {
+            errorMessage = blobMessage;
+          }
+        } else if (typeof error.message === "string") {
+          errorMessage = error.message;
+        }
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+
+      setGenerationError(errorMessage);
+      alert(errorMessage);
+    } finally {
       setIsGenerating(false);
-      setGenerated(true);
-      generationTimeoutRef.current = null;
-    }, 3000);
+    }
   };
 
-  const hasClearableOutput = generated || isGenerating;
+  const handleDownload = () => {
+    if (!generatedVideo) {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = generatedVideo.url;
+    link.download = generatedVideo.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const hasClearableOutput =
+    Boolean(generatedVideo) ||
+    Boolean(generationError) ||
+    isGenerating;
 
   const handleClearPageOutput = () => {
-    if (generationTimeoutRef.current !== null) {
-      window.clearTimeout(generationTimeoutRef.current);
-      generationTimeoutRef.current = null;
+    if (generatedVideo?.url) {
+      URL.revokeObjectURL(generatedVideo.url);
     }
+
     setIsGenerating(false);
-    setGenerated(false);
+    setGeneratedVideo(null);
+    setGenerationError(null);
   };
 
   if (documents.length === 0) {
     return (
-      <div className="h-screen flex items-center justify-center p-6">
+      <div className="h-screen flex items-center justify-center p-6 bg-[#0a0a0a]">
         <PageClearButton
           onClick={handleClearPageOutput}
           disabled={!hasClearableOutput}
@@ -68,22 +307,59 @@ export default function VideoPage() {
           <p className="text-gray-400 text-lg">
             Загрузите документы для создания видео-пересказа
           </p>
+          <button
+            onClick={() => navigate("/")}
+            className="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-[#84cc16] to-[#65a30d] rounded-full text-[#0a0a0a] font-semibold"
+          >
+            <House className="w-4 h-4" />
+            На главную
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (availableFiles.length === 0) {
+    return (
+      <div className="h-screen flex items-center justify-center p-6 bg-[#0a0a0a]">
+        <PageClearButton
+          onClick={handleClearPageOutput}
+          disabled={!hasClearableOutput}
+        />
+        <div className="text-center max-w-xl">
+          <div className="w-20 h-20 mx-auto mb-6 rounded bg-[#151515] border-2 border-[#84cc16] flex items-center justify-center shadow-2xl shadow-[#84cc16]/20">
+            <AlertCircle className="w-10 h-10 text-[#84cc16]" />
+          </div>
+          <h2 className="text-3xl font-semibold text-white mb-3">
+            Нет исходных файлов для отправки
+          </h2>
+          <p className="text-gray-400 text-lg">
+            В памяти браузера остались карточки документов, но сами
+            `File`-объекты недоступны. Загрузите документы заново на
+            главной странице и вернитесь сюда.
+          </p>
+          <button
+            onClick={() => navigate("/")}
+            className="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-[#84cc16] to-[#65a30d] rounded-full text-[#0a0a0a] font-semibold"
+          >
+            <House className="w-4 h-4" />
+            Перезагрузить источник
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen p-6 lg:p-12">
+    <div className="min-h-screen p-6 lg:p-12 bg-[#0a0a0a] text-gray-300">
       <PageClearButton
         onClick={handleClearPageOutput}
-        disabled={!hasClearableOutput}
+        disabled={!hasClearableOutput || isGenerating}
       />
       <div className="max-w-5xl mx-auto">
-        {/* Header */}
         <div className="mb-10">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#151515] border border-[#84cc16] rounded-full mb-6">
-            <Lightbulb className="w-4 h-4 text-[#84cc16]" />
+            <Sparkles className="w-4 h-4 text-[#84cc16]" />
             <span className="text-sm font-medium text-gray-300 uppercase tracking-wider">
               AI Video Synthesis
             </span>
@@ -97,15 +373,13 @@ export default function VideoPage() {
           </p>
         </div>
 
-        {!generated ? (
+        {!generatedVideo ? (
           <div className="bg-[#151515] border border-[#262626] rounded p-8 relative overflow-hidden">
-            {/* Futuristic accent lines */}
             <div className="absolute top-0 right-0 w-40 h-40 opacity-10">
               <div className="absolute top-0 right-0 w-32 h-0.5 bg-gradient-to-l from-[#84cc16] to-transparent"></div>
               <div className="absolute top-0 right-0 w-0.5 h-32 bg-gradient-to-b from-[#84cc16] to-transparent"></div>
             </div>
 
-            {/* Settings */}
             <div className="mb-8 relative z-10">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded bg-gradient-to-br from-[#84cc16] to-[#65a30d] flex items-center justify-center">
@@ -116,101 +390,95 @@ export default function VideoPage() {
                 </h2>
               </div>
 
-              {/* Duration */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-300 mb-3">
-                  Длительность видео:{" "}
-                  <span className="text-[#84cc16]">
-                    {duration} минут
-                  </span>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Исходный файл
                 </label>
-                <input
-                  type="range"
-                  min="3"
-                  max="15"
-                  step="1"
-                  value={duration}
+                <select
+                  value={selectedSourceFile?.name || ""}
                   onChange={(e) =>
-                    setDuration(parseInt(e.target.value))
+                    setSelectedFileName(e.target.value)
                   }
-                  className="w-full h-2 bg-[#262626] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-gradient-to-br [&::-webkit-slider-thumb]:from-[#84cc16] [&::-webkit-slider-thumb]:to-[#65a30d] [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-[#84cc16]/50"
-                />
-                <div className="flex justify-between text-xs text-gray-500 mt-2">
-                  <span>3 мин</span>
-                  <span>15 мин</span>
-                </div>
+                  className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#262626] rounded text-white placeholder:text-gray-600 focus:outline-none focus:border-[#84cc16]"
+                >
+                  {availableFiles.map((file) => (
+                    <option key={file.name} value={file.name}>
+                      {file.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* Style */}
               <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-300 mb-3">
-                  Стиль оформления
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Speaker
                 </label>
-                <div className="grid md:grid-cols-3 gap-4">
-                  <button
-                    onClick={() => setStyle("modern")}
-                    className={`p-5 rounded border-2 transition-all ${
-                      style === "modern"
-                        ? "border-[#84cc16] bg-gradient-to-br from-[#84cc16]/10 to-[#65a30d]/10"
-                        : "border-[#262626] hover:border-[#404040] bg-[#1a1a1a]"
-                    }`}
-                  >
-                    <div className="font-medium text-white">
-                      Современный
-                    </div>
-                    <div className="text-sm text-gray-400 mt-1">
-                      Динамичные анимации
-                    </div>
-                  </button>
+                <select
+                  value={speaker}
+                  onChange={(e) =>
+                    setSpeaker(e.target.value)
+                  }
+                  className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#262626] rounded text-white focus:outline-none focus:border-[#84cc16]"
+                >
+                  {SPEAKER_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                  <button
-                    onClick={() => setStyle("classic")}
-                    className={`p-5 rounded border-2 transition-all ${
-                      style === "classic"
-                        ? "border-[#84cc16] bg-gradient-to-br from-[#84cc16]/10 to-[#65a30d]/10"
-                        : "border-[#262626] hover:border-[#404040] bg-[#1a1a1a]"
-                    }`}
+              <div className="grid md:grid-cols-2 gap-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Summary template
+                  </label>
+                  <select
+                    value={summaryTemplate}
+                    onChange={(e) =>
+                      setSummaryTemplate(e.target.value)
+                    }
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#262626] rounded text-white focus:outline-none focus:border-[#84cc16]"
                   >
-                    <div className="font-medium text-white">
-                      Классический
-                    </div>
-                    <div className="text-sm text-gray-400 mt-1">
-                      Плавные переходы
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => setStyle("minimal")}
-                    className={`p-5 rounded border-2 transition-all ${
-                      style === "minimal"
-                        ? "border-[#84cc16] bg-gradient-to-br from-[#84cc16]/10 to-[#65a30d]/10"
-                        : "border-[#262626] hover:border-[#404040] bg-[#1a1a1a]"
-                    }`}
-                  >
-                    <div className="font-medium text-white">
-                      Минималистичный
-                    </div>
-                    <div className="text-sm text-gray-400 mt-1">
-                      Простота и чистота
-                    </div>
-                  </button>
+                    {SUMMARY_TEMPLATE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Max sentences
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={maxSentences}
+                    onChange={(e) =>
+                      setMaxSentences(
+                        Math.max(1, Number(e.target.value) || 1),
+                      )
+                    }
+                    className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#262626] rounded text-white focus:outline-none focus:border-[#84cc16]"
+                  />
                 </div>
               </div>
 
-              {/* Documents */}
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-3">
-                  Источники ({documents.length})
+                  Доступные источники ({availableFiles.length})
                 </label>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
-                  {documents.map((doc) => (
+                  {availableFiles.map((file) => (
                     <div
-                      key={doc.id}
+                      key={file.name}
                       className="flex items-center gap-3 p-3 bg-[#1a1a1a] rounded border border-[#262626]"
                     >
                       <div className="w-2 h-2 bg-[#22c55e] rounded-full"></div>
                       <span className="text-sm text-gray-300 truncate">
-                        {doc.name}
+                        {file.name}
                       </span>
                     </div>
                   ))}
@@ -218,7 +486,6 @@ export default function VideoPage() {
               </div>
             </div>
 
-            {/* Generate Button */}
             <button
               onClick={handleGenerate}
               disabled={isGenerating}
@@ -226,83 +493,110 @@ export default function VideoPage() {
             >
               <Video className="w-6 h-6" />
               {isGenerating
-                ? "Генерация видео..."
+                ? "Генерирую MP4 через внешний video API..."
                 : "Сгенерировать видео"}
             </button>
+
+            {generationError && (
+              <div className="mt-6 p-4 rounded border border-[#f97316]/30 bg-[#f97316]/10 text-sm text-orange-200">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>{generationError}</span>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Video Preview */}
             <div className="bg-gradient-to-br from-[#84cc16] via-[#65a30d] to-[#4d7c0f] rounded border-2 border-[#84cc16] shadow-2xl shadow-[#84cc16]/30 p-2 relative overflow-hidden">
-              {/* Background pattern */}
               <div className="absolute inset-0 opacity-5">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-white rounded-full blur-3xl"></div>
                 <div className="absolute bottom-0 left-0 w-64 h-64 bg-white rounded-full blur-3xl"></div>
               </div>
 
-              <div className="relative z-10 bg-black/80 aspect-video rounded flex items-center justify-center">
-                <button className="w-24 h-24 bg-white/20 backdrop-blur-xl rounded-full flex items-center justify-center border-2 border-white/30 hover:bg-white/30 transition-all hover:scale-110">
-                  <Play className="w-12 h-12 text-white ml-2" />
-                </button>
-              </div>
+              <video
+                controls
+                preload="metadata"
+                src={generatedVideo.url}
+                className="relative z-10 bg-black/80 aspect-video rounded w-full"
+              >
+                Ваш браузер не поддерживает элемент video.
+              </video>
             </div>
 
-            {/* Controls */}
             <div className="bg-[#151515] border border-[#262626] rounded p-6">
               <div className="flex flex-wrap gap-4">
-                <button className="flex-1 px-6 py-3 bg-gradient-to-r from-[#84cc16] to-[#65a30d] text-white rounded-full hover:shadow-xl hover:shadow-[#84cc16]/30 transition-all flex items-center justify-center gap-2 font-medium">
-                  <Play className="w-5 h-5" />
-                  Воспроизвести
-                </button>
-                <button className="flex-1 px-6 py-3 bg-[#1a1a1a] border border-[#262626] text-gray-300 rounded-full hover:border-[#404040] transition-all flex items-center justify-center gap-2 font-medium">
+                <button
+                  onClick={handleDownload}
+                  className="flex-1 px-6 py-3 bg-[#1a1a1a] border border-[#262626] text-gray-300 rounded-full hover:border-[#404040] transition-all flex items-center justify-center gap-2 font-medium"
+                >
                   <Download className="w-5 h-5" />
                   Скачать MP4
                 </button>
               </div>
 
-              {/* Video Info */}
               <div className="mt-6 pt-6 border-t border-[#262626] grid grid-cols-3 gap-4 text-center">
                 <div>
                   <div className="text-2xl font-bold text-[#84cc16]">
-                    {duration}:00
+                    {generatedVideo.maxSentences}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Длительность
+                    Max sentences
                   </div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-[#84cc16]">
-                    1080p
+                    {generatedVideo.summaryTemplate}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Качество
+                    Template
                   </div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-[#84cc16] capitalize">
-                    {style}
+                    {generatedVideo.speaker}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
-                    Стиль
+                    Speaker
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Info */}
             <div className="p-6 bg-[#151515] border border-[#84cc16]/30 rounded">
-              <p className="text-sm text-gray-300 leading-relaxed flex items-start gap-2">
-                <Lightbulb className="w-4 h-4 text-[#84cc16] flex-shrink-0 mt-0.5" />
-                <span>
-                  <strong className="text-white">Совет:</strong>{" "}
-                  Видео-пересказ создает динамическое видео с
-                  автоматически подобранными изображениями,
-                  анимациями и озвученным текстом на основе
-                  ваших документов. Отлично подходит для
-                  презентаций и обучающих материалов.
-                </span>
-              </p>
+              <div className="grid gap-3 md:grid-cols-2 mb-5 text-sm">
+                <div className="rounded border border-[#262626] bg-[#101010] px-4 py-3">
+                  <span className="text-gray-500">Файл:</span>{" "}
+                  <span className="text-white">
+                    {generatedVideo.sourceFileName}
+                  </span>
+                </div>
+                <div className="rounded border border-[#262626] bg-[#101010] px-4 py-3">
+                  <span className="text-gray-500">Speaker:</span>{" "}
+                  <span className="text-white">
+                    {generatedVideo.speaker}
+                  </span>
+                </div>
+                <div className="rounded border border-[#262626] bg-[#101010] px-4 py-3">
+                  <span className="text-gray-500">
+                    Summary template:
+                  </span>{" "}
+                  <span className="text-white">
+                    {generatedVideo.summaryTemplate}
+                  </span>
+                </div>
+              </div>
             </div>
+          </div>
+        )}
+
+        {isGenerating && (
+          <div className="mt-6 rounded border border-[#262626] bg-[#151515] px-5 py-4 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-[#84cc16]" />
+            <span className="text-sm text-gray-300">
+              Внешний сервис генерирует MP4. Это может занять время
+              даже для короткого документа.
+            </span>
           </div>
         )}
       </div>

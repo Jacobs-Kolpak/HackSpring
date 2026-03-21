@@ -36,10 +36,90 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  sources?: string[];
+  sources?: MessageSource[];
 }
 
+interface SourceReference {
+  source_name: string;
+  chunk_index?: number;
+  page_number?: number | null;
+  page_label?: string | null;
+}
+
+type MessageSource = string | SourceReference;
+
 const HOME_PAGE_STORAGE_KEY = "home_page_state_v1";
+
+function normalizeSourceReference(
+  source: MessageSource,
+): SourceReference {
+  if (typeof source === "string") {
+    return { source_name: source };
+  }
+  return source;
+}
+
+function formatSourceReference(
+  source: MessageSource,
+): string {
+  const normalized = normalizeSourceReference(source);
+  const parts = [normalized.source_name];
+
+  if (normalized.page_label) {
+    parts.push(`стр. ${normalized.page_label}`);
+  } else if (typeof normalized.page_number === "number") {
+    parts.push(`стр. ${normalized.page_number}`);
+  } else if (
+    typeof normalized.chunk_index === "number" &&
+    normalized.chunk_index >= 0
+  ) {
+    parts.push(`чанк ${normalized.chunk_index + 1}`);
+  }
+
+  return parts.join(" • ");
+}
+
+function buildMessageSources(results: any[]): SourceReference[] {
+  const seen = new Set<string>();
+  const collected: SourceReference[] = [];
+
+  for (const item of results) {
+    if (!item || typeof item.source_name !== "string") {
+      continue;
+    }
+
+    const reference: SourceReference = {
+      source_name: item.source_name,
+      chunk_index:
+        typeof item.chunk_index === "number"
+          ? item.chunk_index
+          : undefined,
+      page_number:
+        typeof item.page_number === "number"
+          ? item.page_number
+          : null,
+      page_label:
+        typeof item.page_label === "string"
+          ? item.page_label
+          : null,
+    };
+
+    const dedupeKey = [
+      reference.source_name,
+      reference.page_label ?? reference.page_number ?? "",
+      reference.page_label || reference.page_number ? "" : reference.chunk_index ?? "",
+    ].join("::");
+
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    collected.push(reference);
+  }
+
+  return collected;
+}
 
 export default function Home() {
   const {
@@ -442,8 +522,8 @@ export default function Home() {
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: response.data.answer,
-        sources: response.data.sources
-          ? response.data.sources.map((s: any) => s.source_name)
+        sources: Array.isArray(response.data.results)
+          ? buildMessageSources(response.data.results)
           : [],
       };
       setMessages((prev) => [...prev, aiMessage]);
@@ -857,7 +937,7 @@ export default function Home() {
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#151515] border border-[#262626] rounded text-xs text-gray-400"
                               >
                                 <FileText className="w-3 h-3" />
-                                {source}
+                                {formatSourceReference(source)}
                               </span>
                             ),
                           )}

@@ -89,6 +89,14 @@ class PresentationSettings(BaseSettings):
     max_bullets_per_slide: int = 5
 
 
+class VideoSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="VIDEO_", extra="ignore")
+
+    base_url: str = "http://194.67.101.6:8080"
+    api_key: str = ""
+    timeout_seconds: float = 300.0
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
@@ -141,6 +149,10 @@ class Settings(BaseSettings):
     @cached_property
     def presentation(self) -> PresentationSettings:
         return PresentationSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
+
+    @cached_property
+    def video(self) -> VideoSettings:
+        return VideoSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
 
 settings = Settings()
