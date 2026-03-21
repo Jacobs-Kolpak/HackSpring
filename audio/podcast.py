@@ -28,7 +28,7 @@ class PodcastGenerator:
 
     def generate_dialogue(self, text: str, topic: str, config: Optional[PodcastConfig] = None) -> str:
         cfg = config or PodcastConfig()
-        clean = self._clean(text)
+        clean = self._prepare_source_for_prompt(text)
         prompt = self._build_prompt(text=clean, topic=topic, tone=cfg.tone, pace=cfg.pace)
 
         raw = self.remote_llm_client.generate(prompt=prompt, temperature=0.3)
@@ -128,19 +128,46 @@ class PodcastGenerator:
 
     @staticmethod
     def _clean(text: str) -> str:
-        normalized = re.sub(r"\s+", " ", text).strip()
+        normalized = re.sub(r"[-‐‑]\s*\n\s*", "", text)
+        normalized = normalized.replace("\n", " ")
+        normalized = re.sub(r"\s+", " ", normalized).strip()
         normalized = re.sub(r"([.!?])([А-ЯA-Z])", r"\1 \2", normalized)
+        normalized = re.sub(r"([a-zа-я])([A-ZА-Я])", r"\1 \2", normalized)
+        normalized = re.sub(r"([A-Za-z])([А-Яа-я])", r"\1 \2", normalized)
+        normalized = re.sub(r"([А-Яа-я])([A-Za-z])", r"\1 \2", normalized)
+        normalized = re.sub(r"\b\d+\s*$", "", normalized)
         return normalized
+
+    @staticmethod
+    def _prepare_source_for_prompt(text: str) -> str:
+        clean = PodcastGenerator._clean(text)
+        parts = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
+        selected = []
+        for sentence in parts:
+            if len(sentence) < 25:
+                continue
+            if re.fullmatch(r"[\W\d_]+", sentence):
+                continue
+            selected.append(sentence)
+            if len(selected) >= 18:
+                break
+        if not selected:
+            return clean[:3500]
+        return " ".join(selected)[:3500]
 
     @staticmethod
     def _build_prompt(text: str, topic: str, tone: str, pace: str) -> str:
         tone_hint = "научный" if tone == "scientific" else "повседневный"
         pace_hint = "медленный" if pace == "slow" else ("быстрый" if pace == "fast" else "средний")
         return (
-            "Сделай диалог двух ведущих по этому тексту.\n"
+            "Сделай читаемый диалог двух ведущих по этому тексту.\n"
             f"Стиль: {tone_hint}.\n"
             f"Темп речи: {pace_hint}.\n"
-            "Формат строк: только 'Ведущий 1: ...' и 'Ведущий 2: ...'.\n"
+            "Требования:\n"
+            "- Только русский язык, без латиницы и обрывков слов.\n"
+            "- 30-35 реплик, короткие и понятные.\n"
+            "- Каждая строка строго начинается с 'Ведущий 1:' или 'Ведущий 2:'.\n"
+            "- Не вставляй служебный текст, JSON, комментарии и номера страниц.\n"
             f"Тема: {topic}.\n"
             f"Текст:\n{text}\n"
             "Диалог:"
