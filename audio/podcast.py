@@ -22,6 +22,7 @@ class PodcastGenerator:
 
     _silero_model = None
     _silero_sample_rate = 48000
+    _silero_load_error: Optional[str] = None
 
     def __init__(self, remote_llm_client: RemoteLLMClient):
         self.remote_llm_client = remote_llm_client
@@ -68,6 +69,7 @@ class PodcastGenerator:
 
         wav_parts: List["np.ndarray"] = []
         pause = np.zeros(int(0.14 * sample_rate), dtype=np.float32)
+        success_chunks = 0
 
         for speaker_id, text_part in chunks:
             text = text_part.strip()
@@ -84,13 +86,26 @@ class PodcastGenerator:
                     put_yo=True,
                 )
             except Exception:
-                return False
+                safe_text = self._sanitize_tts_text(text)
+                if not safe_text:
+                    continue
+                try:
+                    audio = model.apply_tts(
+                        text=safe_text,
+                        speaker=speaker,
+                        sample_rate=sample_rate,
+                        put_accent=True,
+                        put_yo=True,
+                    )
+                except Exception:
+                    continue
 
             wav = audio.detach().cpu().numpy().astype(np.float32)
             wav_parts.append(wav)
             wav_parts.append(pause)
+            success_chunks += 1
 
-        if not wav_parts:
+        if not wav_parts or success_chunks == 0:
             return False
 
         full_audio = np.concatenate(wav_parts)
@@ -108,6 +123,8 @@ class PodcastGenerator:
 
     @classmethod
     def _load_silero_model(cls):
+        if cls._silero_load_error:
+            return None, None
         if cls._silero_model is not None:
             return cls._silero_model, cls._silero_sample_rate
         try:
@@ -123,8 +140,13 @@ class PodcastGenerator:
             cls._silero_model = model
             cls._silero_sample_rate = 48000
             return cls._silero_model, cls._silero_sample_rate
-        except Exception:
+        except Exception as exc:
+            cls._silero_load_error = f"{type(exc).__name__}: {exc}"
             return None, None
+
+    @classmethod
+    def get_silero_load_error(cls) -> str:
+        return (cls._silero_load_error or "").strip()
 
     @staticmethod
     def _clean(text: str) -> str:
@@ -228,3 +250,9 @@ class PodcastGenerator:
             # В озвучку передаем только реплику, без префикса "Ведущий"
             chunks.append((int(match.group(1)), match.group(2).strip()))
         return chunks
+
+    @staticmethod
+    def _sanitize_tts_text(text: str) -> str:
+        cleaned = re.sub(r"[^\w\s.,!?;:()\"'«»—-]", " ", text, flags=re.UNICODE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned[:280]
