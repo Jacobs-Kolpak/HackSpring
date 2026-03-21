@@ -24,7 +24,7 @@ import { useDocuments } from "../context/DocumentContext";
 import { useNavigate } from "react-router";
 import ReactMarkdown from "react-markdown";
 import axiosInstance from "../utils/axiosInstance";
-import axios, { AxiosResponse } from "axios";
+import axios from "axios";
 import { API_ROUTES } from "../constants/api";
 import PageClearButton from "../components/PageClearButton";
 import {
@@ -102,116 +102,89 @@ export default function Home() {
     setCurrentPodcastAudioLoading(true);
     setUploadedSourceFiles(files);
     const formData = new FormData();
-    const mindmapFormData = new FormData();
 
-    // For RAG, append all files
+    // For RAG, append all files; read text content for persistence
     const newDocuments = [];
     for (const file of files) {
       formData.append("files", file);
+      let textContent = "";
+      try {
+        textContent = await file.text();
+      } catch {
+        // binary files — leave content empty
+      }
       newDocuments.push({
         id: Math.random().toString(36).substr(2, 9),
         name: file.name,
         type: file.type,
         size: file.size,
-        content: "", // Content will be fetched or not needed after ingest
+        content: textContent,
         uploadedAt: new Date(),
       });
-    }
-
-    // For mindmap, only the first file is used
-    if (files.length > 0) {
-      mindmapFormData.append("file", files[0]);
     }
 
     setCurrentFlashcards([]);
     setCurrentTests([]);
 
     try {
-      // Perform RAG ingestion
+      // Each parallel request gets its OWN FormData to avoid body-consumption issues
+      const makeFD = () => {
+        const fd = new FormData();
+        fd.append("file", files[0]);
+        return fd;
+      };
+
+      // RAG ingestion uses all files
       const ragResponsePromise = axiosInstance.post(
         API_ROUTES.RAG.INGEST,
         formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        },
-      );
+        { headers: { "Content-Type": "multipart/form-data" } },
+      ).catch((err) => { console.error("RAG ingest failed:", err); return null; });
 
-      // Perform mindmap generation in parallel
-      let mindmapResponsePromise = Promise.resolve(null);
-      if (files.length > 0) {
-        mindmapResponsePromise = axiosInstance.post(
-          API_ROUTES.MINDMAP.FILE,
-          mindmapFormData,
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-          },
-        );
-      }
+      // Content generation — each with its own FormData and individual error handling
+      const mindmapResponsePromise = files.length > 0
+        ? axiosInstance.post(API_ROUTES.MINDMAP.FILE, makeFD(), {
+            headers: { "Content-Type": "multipart/form-data" },
+          }).catch((err) => { console.error("Mindmap generation failed:", err); return null; })
+        : Promise.resolve(null);
 
-      // Perform podcast generation in parallel
-      let podcastResponsePromise = Promise.resolve(null);
-      if (files.length > 0) {
-        podcastResponsePromise = axiosInstance.post(
-          API_ROUTES.PODCAST.FILE,
-          mindmapFormData, // Using the same form data as mindmap
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-          },
-        );
-      }
+      const podcastResponsePromise = files.length > 0
+        ? axiosInstance.post(API_ROUTES.PODCAST.FILE, makeFD(), {
+            headers: { "Content-Type": "multipart/form-data" },
+          }).catch((err) => { console.error("Podcast generation failed:", err); return null; })
+        : Promise.resolve(null);
 
-      let flashcardsResponsePromise = Promise.resolve(null);
-      if (files.length > 0) {
-        const flashcardsFormData = new FormData();
-        flashcardsFormData.append("file", files[0]);
-        flashcardsResponsePromise = axiosInstance.post(
-          API_ROUTES.FLASHCARDS.FILE,
-          flashcardsFormData,
-          {
-            headers: {
-              "Content-Type": "multipart/form-data",
-            },
-          },
-        );
-      }
+      const flashcardsResponsePromise = files.length > 0
+        ? axiosInstance.post(API_ROUTES.FLASHCARDS.FILE, makeFD(), {
+            headers: { "Content-Type": "multipart/form-data" },
+          }).catch((err) => { console.error("Flashcards generation failed:", err); return null; })
+        : Promise.resolve(null);
 
-      const [ragResponse, mindmapResponseRaw, podcastResponseRaw, flashcardsResponseRaw] = (await Promise.all([
+      const [ragResponse, mindmapResponseRaw, podcastResponseRaw, flashcardsResponseRaw] = await Promise.all([
         ragResponsePromise,
         mindmapResponsePromise,
         podcastResponsePromise,
         flashcardsResponsePromise,
-      ])) as [
-        AxiosResponse<any>,
-        AxiosResponse<any> | null,
-        AxiosResponse<{ audio_url: string; filename: string }> | null,
-        AxiosResponse<any> | null,
-      ];
+      ]);
 
-      const mindmapResponse = mindmapResponseRaw as { data: { nodes: any[]; edges: any[] } } | null;
-      const podcastResponse: { audio_url: string; filename: string } | null = podcastResponseRaw?.data || null;
-      const flashcardsResponse = flashcardsResponseRaw?.data || null;
+      // Add documents to context regardless of generation results
+      if (ragResponse) {
+        console.log("Ingestion successful:", ragResponse.data);
+      }
+      newDocuments.forEach((doc) => addDocument(doc));
 
-      console.log("Ingestion successful:", ragResponse.data);
-      newDocuments.forEach((doc) => addDocument(doc)); // Add to local context after successful upload
-
-      if (mindmapResponse) {
-        console.log("Mindmap generation successful:", mindmapResponse.data);
-        const { nodes, edges } = mindmapResponse.data;
+      if (mindmapResponseRaw) {
+        console.log("Mindmap generation successful:", mindmapResponseRaw.data);
+        const { nodes, edges } = mindmapResponseRaw.data;
 
         const mapRelevanceToLevel = (relevance: number | undefined): number => {
-          if (relevance === undefined) return 0; // Default to main topic if relevance is not provided
-          if (relevance >= 0.7) return 0; // Главная тема
-          if (relevance >= 0.3 && relevance < 0.7) return 1; // Концепции
-          return 2; // Подтемы
+          if (relevance === undefined) return 0;
+          if (relevance >= 0.7) return 0;
+          if (relevance >= 0.3 && relevance < 0.7) return 1;
+          return 2;
         };
 
-        const mindmapGraphData = {
+        setCurrentMindmapGraphData({
           nodes: nodes.map((n: any) => ({
             id: String(n.id),
             label: n.label,
@@ -225,37 +198,37 @@ export default function Home() {
             source: String(e.from),
             target: String(e.to),
           })),
-        };
-        setCurrentMindmapGraphData(mindmapGraphData);
+        });
       }
 
+      const podcastResponse = podcastResponseRaw?.data || null;
       if (podcastResponse && podcastResponse.audio_url) {
         console.log("Podcast generation successful:", podcastResponse);
-        console.log("Podcast audio URL received:", podcastResponse.audio_url);
         setCurrentPodcastAudioUrl(podcastResponse.audio_url);
       }
 
+      const flashcardsResponse = flashcardsResponseRaw?.data || null;
       if (flashcardsResponse) {
-        const generatedFlashcards = (flashcardsResponse.flashcards || []).map((card: any, index: number) => ({
-          id: card.id || `flashcard-${index}`,
-          question: card.question,
-          answer: card.answer,
-        }));
-        const generatedTests = (flashcardsResponse.tests || []).map((test: any, index: number) => ({
-          id: test.id || `test-${index}`,
-          question: test.question,
-          options: test.options,
-          correctAnswer: test.correct_index ?? test.correctAnswer,
-          explanation: test.explanation,
-        }));
-
-        setCurrentFlashcards(generatedFlashcards);
-        setCurrentTests(generatedTests);
+        setCurrentFlashcards(
+          (flashcardsResponse.flashcards || []).map((card: any, index: number) => ({
+            id: card.id || `flashcard-${index}`,
+            question: card.question,
+            answer: card.answer,
+          })),
+        );
+        setCurrentTests(
+          (flashcardsResponse.tests || []).map((test: any, index: number) => ({
+            id: test.id || `test-${index}`,
+            question: test.question,
+            options: test.options,
+            correctAnswer: test.correct_index ?? test.correctAnswer,
+            explanation: test.explanation,
+          })),
+        );
       }
 
     } catch (error) {
       console.error("Error during file upload:", error);
-      // Optionally show an error message to the user
     } finally {
       setIsLoading(false);
       setCurrentPodcastAudioLoading(false);
@@ -303,18 +276,23 @@ export default function Home() {
       const urlObj = new URL(url);
       const urlName = urlObj.hostname + urlObj.pathname;
 
-      const parseResponse = await axios.post(API_ROUTES.PARSER.PARSE, {
+      // Parse URL and ingest into vector DB in one call
+      const ingestResponse = await axiosInstance.post(API_ROUTES.PARSER.INGEST, {
         url,
-        max_pages: 10,
-        max_depth: 1,
-        same_domain: true,
-        min_chars: 280,
       });
 
-      const parsedText =
-        typeof parseResponse.data === "string"
-          ? parseResponse.data
-          : "";
+      const { title, indexed, inserted_chunks } = ingestResponse.data;
+
+      if (!indexed || inserted_chunks === 0) {
+        throw new Error("Парсер не смог извлечь текст со страницы.");
+      }
+
+      // Also parse to get text for content generation (mindmap, podcast, flashcards)
+      const parseResponse = await axiosInstance.post(API_ROUTES.PARSER.PARSE, {
+        url,
+      });
+
+      const parsedText = parseResponse.data?.text || "";
 
       if (!parsedText.trim()) {
         throw new Error("Парсер вернул пустой текст.");
@@ -325,13 +303,97 @@ export default function Home() {
           .replace(/[^a-zA-Z0-9-_./]+/g, "_")
           .replace(/[/.]+$/g, "") || "parsed-url";
 
-      const parsedFile = new File(
-        [parsedText],
-        `${safeFileName}.txt`,
-        { type: "text/plain" },
-      );
+      const docName = title || safeFileName;
 
-      await processFiles([parsedFile]);
+      // Add document to local context (store parsed text so other pages can use it)
+      addDocument({
+        id: Math.random().toString(36).substr(2, 9),
+        name: docName,
+        type: "text/plain",
+        size: parsedText.length,
+        content: parsedText,
+        uploadedAt: new Date(),
+      });
+
+      // Create blob from parsed text for content generation (mindmap, podcast, flashcards)
+      // NOTE: use Blob instead of File constructor for Safari compatibility
+      const parsedBlob = new Blob([parsedText], { type: "text/plain" });
+      const parsedFileName = `${safeFileName}.txt`;
+
+      // Generate content (mindmap, podcast, flashcards) without re-ingesting into RAG
+      // Each request needs its OWN FormData — reusing one FormData across
+      // multiple parallel requests can cause empty bodies after the first read.
+      const makeFD = () => {
+        const fd = new FormData();
+        fd.append("file", parsedBlob, parsedFileName);
+        return fd;
+      };
+
+      setCurrentFlashcards([]);
+      setCurrentTests([]);
+      setCurrentPodcastAudioLoading(true);
+
+      const [mindmapRes, podcastRes, flashcardsRes] = await Promise.all([
+        axiosInstance.post(API_ROUTES.MINDMAP.FILE, makeFD(), {
+          headers: { "Content-Type": "multipart/form-data" },
+        }).catch((err) => { console.error("Mindmap generation failed:", err); return null; }),
+        axiosInstance.post(API_ROUTES.PODCAST.FILE, makeFD(), {
+          headers: { "Content-Type": "multipart/form-data" },
+        }).catch((err) => { console.error("Podcast generation failed:", err); return null; }),
+        axiosInstance.post(API_ROUTES.FLASHCARDS.FILE, makeFD(), {
+          headers: { "Content-Type": "multipart/form-data" },
+        }).catch((err) => { console.error("Flashcards generation failed:", err); return null; }),
+      ]);
+
+      setCurrentPodcastAudioLoading(false);
+
+      if (mindmapRes) {
+        const { nodes, edges } = mindmapRes.data;
+        const mapRelevanceToLevel = (relevance: number | undefined): number => {
+          if (relevance === undefined) return 0;
+          if (relevance >= 0.7) return 0;
+          if (relevance >= 0.3) return 1;
+          return 2;
+        };
+        setCurrentMindmapGraphData({
+          nodes: nodes.map((n: any) => ({
+            id: String(n.id),
+            label: n.label,
+            level: mapRelevanceToLevel(n.relevance),
+            title: n.title,
+            value: n.value,
+            relevance: n.relevance,
+            summary: n.summary,
+          })),
+          links: edges.map((e: any) => ({
+            source: String(e.from),
+            target: String(e.to),
+          })),
+        });
+      }
+
+      if (podcastRes?.data?.audio_url) {
+        setCurrentPodcastAudioUrl(podcastRes.data.audio_url);
+      }
+
+      if (flashcardsRes?.data) {
+        setCurrentFlashcards(
+          (flashcardsRes.data.flashcards || []).map((card: any, i: number) => ({
+            id: card.id || `flashcard-${i}`,
+            question: card.question,
+            answer: card.answer,
+          })),
+        );
+        setCurrentTests(
+          (flashcardsRes.data.tests || []).map((test: any, i: number) => ({
+            id: test.id || `test-${i}`,
+            question: test.question,
+            options: test.options,
+            correctAnswer: test.correct_index ?? test.correctAnswer,
+            explanation: test.explanation,
+          })),
+        );
+      }
 
       setUrlInput("");
       setShowUrlInput(false);

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 
 export interface Node {
   id: string;
@@ -67,26 +67,83 @@ interface DocumentContextType {
 
 const DocumentContext = createContext<DocumentContextType | undefined>(undefined);
 
+// ---- sessionStorage persistence helpers ----
+const STORAGE_KEY = 'docCtx';
+
+interface PersistedState {
+  documents: Document[];
+  mindmap: MindmapGraphData | null;
+  podcastUrl: string | null;
+  flashcards: FlashcardStudyItem[];
+  tests: TestQuestion[];
+}
+
+function loadPersistedState(): PersistedState | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedState;
+    // Restore Date objects for uploadedAt
+    if (parsed.documents) {
+      parsed.documents = parsed.documents.map(d => ({
+        ...d,
+        uploadedAt: new Date(d.uploadedAt),
+      }));
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedState(state: PersistedState) {
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // sessionStorage full or unavailable — ignore
+  }
+}
+
 export function DocumentProvider({ children }: { children: ReactNode }) {
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [currentMindmapGraphData, setCurrentMindmapGraphData] = useState<MindmapGraphData | null>(null);
-  const [currentPodcastAudioUrl, setCurrentPodcastAudioUrl] = useState<string | null>(null);
+  const persisted = loadPersistedState();
+
+  const [documents, setDocuments] = useState<Document[]>(persisted?.documents ?? []);
+  const [currentMindmapGraphData, setCurrentMindmapGraphData] = useState<MindmapGraphData | null>(persisted?.mindmap ?? null);
+  const [currentPodcastAudioUrl, setCurrentPodcastAudioUrl] = useState<string | null>(persisted?.podcastUrl ?? null);
   const [currentPodcastAudioLoading, setCurrentPodcastAudioLoading] = useState(false);
-  const [currentFlashcards, setCurrentFlashcards] = useState<FlashcardStudyItem[]>([]);
-  const [currentTests, setCurrentTests] = useState<TestQuestion[]>([]);
+  const [currentFlashcards, setCurrentFlashcards] = useState<FlashcardStudyItem[]>(persisted?.flashcards ?? []);
+  const [currentTests, setCurrentTests] = useState<TestQuestion[]>(persisted?.tests ?? []);
   const [uploadedSourceFiles, setUploadedSourceFiles] = useState<File[]>([]);
 
-  const addDocument = (doc: Document) => {
+  // Persist serialisable state to sessionStorage on every change
+  useEffect(() => {
+    savePersistedState({
+      documents,
+      mindmap: currentMindmapGraphData,
+      podcastUrl: currentPodcastAudioUrl,
+      flashcards: currentFlashcards,
+      tests: currentTests,
+    });
+  }, [documents, currentMindmapGraphData, currentPodcastAudioUrl, currentFlashcards, currentTests]);
+
+  const addDocument = useCallback((doc: Document) => {
     setDocuments(prev => [...prev, doc]);
-  };
+  }, []);
 
-  const removeDocument = (id: string) => {
+  const removeDocument = useCallback((id: string) => {
     setDocuments(prev => prev.filter(doc => doc.id !== id));
-  };
+  }, []);
 
-  const clearDocuments = () => {
+  const clearDocuments = useCallback(() => {
     setDocuments([]);
-  };
+    setCurrentMindmapGraphData(null);
+    setCurrentPodcastAudioUrl(null);
+    setCurrentPodcastAudioLoading(false);
+    setCurrentFlashcards([]);
+    setCurrentTests([]);
+    setUploadedSourceFiles([]);
+    sessionStorage.removeItem(STORAGE_KEY);
+  }, []);
 
   return (
     <DocumentContext.Provider value={{

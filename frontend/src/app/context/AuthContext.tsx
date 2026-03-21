@@ -54,40 +54,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadUser = useCallback(async () => {
       setLoading(true);
       const accessToken = localStorage.getItem('access_token');
-  
+
       if (!accessToken) {
-        console.log('loadUser: No access token found, setting user to null.');
         setUser(null);
         setLoading(false);
         return;
       }
-  
+
+      // Safety timeout — never hang on loading more than 8 seconds
+      const safetyTimer = setTimeout(() => {
+        setLoading(false);
+      }, 8000);
+
       try {
         const response = await axiosInstance.get(API_ROUTES.AUTH.ME);
         setUser(response.data.user);
       } catch (error) {
         console.error('loadUser: Failed to fetch user data with existing access token:', error);
         const newAccessToken = await refreshAccessToken();
-  
+
         if (newAccessToken) {
           try {
             const response = await axiosInstance.get(API_ROUTES.AUTH.ME, {
-              headers: {
-                Authorization: `Bearer ${newAccessToken}`,
-              },
+              headers: { Authorization: `Bearer ${newAccessToken}` },
             });
             setUser(response.data.user);
           } catch (refreshError) {
-            console.error('loadUser: Failed to fetch user data after refresh, logging out.', refreshError);
             logout();
           }
         } else {
-          console.log('loadUser: No new access token after refresh attempt, logging out.');
           logout();
         }
       } finally {
+        clearTimeout(safetyTimer);
         setLoading(false);
-        console.log('loadUser: Loading finished.');
       }
     }, [refreshAccessToken]);
 

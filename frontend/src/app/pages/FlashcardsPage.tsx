@@ -7,11 +7,14 @@ import {
   ChevronRight,
   FileText,
   House,
+  Loader2,
 } from "lucide-react";
 import { useDocuments } from "../context/DocumentContext";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import PageClearButton from "../components/PageClearButton";
+import axiosInstance from "../utils/axiosInstance";
+import { API_ROUTES } from "../constants/api";
 
 export default function FlashcardsPage() {
   const {
@@ -30,7 +33,46 @@ export default function FlashcardsPage() {
     Record<string, number>
   >({});
   const [showResults, setShowResults] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  const handleGenerateFromDocuments = async () => {
+    if (documents.length === 0) return;
+    setIsGenerating(true);
+    setGenerateError(null);
+    try {
+      const doc = documents[0];
+      const blob = new Blob([doc.content], { type: doc.type || "text/plain" });
+      const fd = new FormData();
+      fd.append("file", blob, doc.name);
+      const res = await axiosInstance.post(API_ROUTES.FLASHCARDS.FILE, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      if (res.data) {
+        setCurrentFlashcards(
+          (res.data.flashcards || []).map((card: any, i: number) => ({
+            id: card.id || `flashcard-${i}`,
+            question: card.question,
+            answer: card.answer,
+          }))
+        );
+        setCurrentTests(
+          (res.data.tests || []).map((test: any, i: number) => ({
+            id: test.id || `test-${i}`,
+            question: test.question,
+            options: test.options,
+            correctAnswer: test.correct_index ?? test.correctAnswer,
+            explanation: test.explanation,
+          }))
+        );
+      }
+    } catch (err) {
+      setGenerateError("Не удалось сгенерировать карточки. Попробуйте снова.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleNextCard = () => {
     if (currentCard < currentFlashcards.length - 1) {
@@ -128,17 +170,31 @@ export default function FlashcardsPage() {
             <BookOpen className="w-10 h-10 text-[#38C571]" />
           </div>
           <h2 className="text-3xl font-semibold text-white mb-3">
-            Материалы еще не готовы
+            Карточки ещё не готовы
           </h2>
-          <p className="text-gray-400 text-lg">
-            Карточки и тесты формируются при загрузке файла на главной странице. Откройте главную и добавьте документ.
+          <p className="text-gray-400 text-lg mb-6">
+            Нажмите кнопку ниже, чтобы сгенерировать карточки по загруженным документам.
           </p>
+          {generateError && (
+            <p className="text-red-400 text-sm mb-4">{generateError}</p>
+          )}
+          <button
+            onClick={handleGenerateFromDocuments}
+            disabled={isGenerating}
+            className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#38C571] to-[#70D116] rounded-full text-[#0a0a0a] font-semibold disabled:opacity-60"
+          >
+            {isGenerating ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Генерация...</>
+            ) : (
+              <><Zap className="w-4 h-4" /> Сгенерировать карточки</>
+            )}
+          </button>
           <button
             onClick={() => navigate("/")}
-            className="mt-6 inline-flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-[#38C571] to-[#70D116] rounded-full text-[#0a0a0a] font-semibold"
+            className="mt-4 flex items-center gap-2 mx-auto text-gray-400 hover:text-white text-sm"
           >
             <House className="w-4 h-4" />
-            Перейти на главную
+            Вернуться на главную
           </button>
         </div>
       </div>

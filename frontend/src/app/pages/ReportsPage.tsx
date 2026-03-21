@@ -53,7 +53,7 @@ const markdownToPlainText = (value: string) =>
     .trim();
 
 export default function ReportsPage() {
-  const { uploadedSourceFiles } = useDocuments();
+  const { documents, uploadedSourceFiles } = useDocuments();
   const persistedState = readSessionState(
     REPORTS_PAGE_STORAGE_KEY,
     {
@@ -103,10 +103,10 @@ export default function ReportsPage() {
   );
 
   useEffect(() => {
-    if (uploadedSourceFiles.length > 0 && !selectedFileName) {
-      setSelectedFileName(uploadedSourceFiles[0].name);
+    if (documents.length > 0 && !selectedFileName) {
+      setSelectedFileName(documents[0].name);
     }
-  }, [selectedFileName, uploadedSourceFiles]);
+  }, [selectedFileName, documents]);
 
   useEffect(() => {
     writeSessionState(REPORTS_PAGE_STORAGE_KEY, {
@@ -136,18 +136,24 @@ export default function ReportsPage() {
     topic,
   ]);
 
-  const selectedFile = useMemo(() => {
-    if (uploadedSourceFiles.length === 0) {
-      return null;
-    }
-
+  // Find the selected document from the persisted documents list
+  const selectedDoc = useMemo(() => {
+    if (documents.length === 0) return null;
     return (
-      uploadedSourceFiles.find((file) => file.name === selectedFileName) ||
+      documents.find((d) => d.name === selectedFileName) || documents[0]
+    );
+  }, [selectedFileName, documents]);
+
+  // Also check uploadedSourceFiles for raw File objects (file uploads)
+  const selectedFile = useMemo(() => {
+    if (uploadedSourceFiles.length === 0) return null;
+    return (
+      uploadedSourceFiles.find((f) => f.name === selectedFileName) ||
       uploadedSourceFiles[0]
     );
   }, [selectedFileName, uploadedSourceFiles]);
 
-  const availableFilesCount = uploadedSourceFiles.length;
+  const availableFilesCount = documents.length;
 
   const selectedMode = SUMMARY_MODES.find(
     (mode) => mode.id === selectedModeId,
@@ -161,7 +167,7 @@ export default function ReportsPage() {
     const sections = [
       "# Summary",
       "",
-      `Источник: ${generatedSummary.source || selectedFile?.name || "Не указан"}`,
+      `Источник: ${generatedSummary.source || selectedDoc?.name || selectedFile?.name || "Не указан"}`,
       `Модель: ${generatedSummary.model || "Не указана"}`,
       "",
       "## Summary Text",
@@ -260,7 +266,7 @@ export default function ReportsPage() {
   };
 
   const handleGenerateSummary = async () => {
-    if (!selectedFile) {
+    if (!selectedFile && !selectedDoc) {
       setErrorMessage(
         "Исходный файл не найден. Загрузите документ заново на главной странице.",
       );
@@ -285,7 +291,13 @@ export default function ReportsPage() {
     setGeneratedSummary(null);
 
     const formData = new FormData();
-    formData.append("file", selectedFile);
+    // Use raw File object if available, otherwise create Blob from persisted document content
+    if (selectedFile) {
+      formData.append("file", selectedFile);
+    } else if (selectedDoc) {
+      const blob = new Blob([selectedDoc.content], { type: selectedDoc.type || "text/plain" });
+      formData.append("file", blob, selectedDoc.name);
+    }
 
     if (topic.trim()) {
       formData.append("topic", topic.trim());
@@ -383,7 +395,7 @@ export default function ReportsPage() {
     });
   };
 
-  if (uploadedSourceFiles.length === 0) {
+  if (documents.length === 0) {
     return (
       <div className="h-screen flex items-center justify-center p-6">
         <PageClearButton
@@ -447,9 +459,9 @@ export default function ReportsPage() {
                   }
                   className="w-full px-4 py-3 bg-[#0f0f0f] border border-[#262626] rounded text-white focus:outline-none focus:border-[#8b5cf6]"
                 >
-                  {uploadedSourceFiles.map((file) => (
-                    <option key={file.name} value={file.name}>
-                      {file.name}
+                  {documents.map((doc) => (
+                    <option key={doc.id} value={doc.name}>
+                      {doc.name}
                     </option>
                   ))}
                 </select>
