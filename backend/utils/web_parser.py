@@ -1,44 +1,39 @@
 from __future__ import annotations
 
+import logging
 import re
-import time
-from collections import Counter, deque
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Deque, Dict, Iterable, List, Optional, Set, Tuple
-from urllib.parse import urldefrag, urljoin, urlparse
-from urllib.robotparser import RobotFileParser
+from typing import Any, Dict, Optional
+from urllib.parse import urldefrag, urlparse
 
 import httpx
 
-_BINARY_EXTENSIONS = {
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".zip", ".rar", ".7z", ".tar", ".gz", ".exe", ".dmg",
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
-    ".mp3", ".wav", ".ogg", ".mp4", ".avi", ".mov", ".mkv",
-}
-_NAV_WORDS = {
-    "menu", "login", "sign in", "cookie", "privacy", "policy", "terms",
-    "copyright", "войти", "меню", "cookie", "политик",
-}
-_NOISY_PATTERNS = (
-    "перейти к навигации",
-    "перейти к поиску",
-    "материал из википедии",
-    "this page was last edited",
+from backend.utils.llm import generate_text
+
+log = logging.getLogger(__name__)
+
+_LLM_SYSTEM_PROMPT = (
+    "Ты — специалист по извлечению контента из веб-страниц. "
+    "Тебе дан HTML-контент страницы, предварительно очищенный от скриптов и стилей. "
+    "Твоя задача:\n"
+    "1. Извлечь весь полезный текстовый контент страницы.\n"
+    "2. Убрать навигацию, рекламу, футеры, хедеры, сайдбары и прочий шум.\n"
+    "3. Структурировать текст: сохранить заголовки, списки, абзацы.\n"
+    "4. Вернуть чистый структурированный текст в формате:\n"
+    "   - Заголовки обозначай через '# ', '## ', '### '\n"
+    "   - Списки через '- ' или '1. '\n"
+    "   - Абзацы разделяй пустой строкой\n"
+    "5. НЕ добавляй от себя никакой информации. Только то, что есть на странице.\n"
+    "6. НЕ оборачивай ответ в markdown-блоки (``` и т.п.), верни просто текст.\n"
+    "7. Если на странице нет полезного контента — верни пустую строку."
 )
 
 
 @dataclass
 class ParserConfig:
-    max_pages: int = 10
-    max_depth: int = 1
-    same_domain: bool = True
-    min_chars: int = 280
     timeout_sec: float = 20.0
     retries: int = 2
     backoff_sec: float = 1.2
-    respect_robots: bool = True
     user_agent: str = (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -50,20 +45,7 @@ class ParsedPage:
     url: str
     title: str
     text: str
-    extractor: str = "unknown"
-    quality_score: float = 0.0
-    depth: int = 0
     meta: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class _ExtractionResult:
-    text: str
-    extractor: str
-    score: float
-
-
-_ROBOTS_CACHE: Dict[str, Optional[RobotFileParser]] = {}
 
 
 def _normalize_url(url: str) -> str:
@@ -73,21 +55,6 @@ def _normalize_url(url: str) -> str:
     if not clean.startswith(("http://", "https://")):
         clean = f"https://{clean}"
     return urldefrag(clean)[0]
-
-
-def _sanitize_filename(value: str, fallback: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9а-яА-ЯёЁ_-]+", "_", value).strip("_")
-    return (slug[:70] or fallback).lower()
-
-
-def _normalize_text(text: str) -> str:
-    text = text.replace("\u00a0", " ")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
-    text = re.sub(r"([(\[{])\s+", r"\1", text)
-    text = re.sub(r"\s+([)\]}])", r"\1", text)
-    return text.strip()
 
 
 def _extract_title(html_text: str, fallback: str = "untitled") -> str:
@@ -109,184 +76,37 @@ def _extract_title(html_text: str, fallback: str = "untitled") -> str:
     return fallback
 
 
-def _path_extension(url: str) -> str:
-    return Path(urlparse(url).path).suffix.lower()
-
-
-def _is_probably_html_url(url: str) -> bool:
-    ext = _path_extension(url)
-    if not ext:
-        return True
-    return ext not in _BINARY_EXTENSIONS
-
-
-def _extract_links(html_text: str, base_url: str) -> List[str]:
+def _preclean_html(html_text: str) -> str:
+    """Remove scripts, styles, and other non-content elements to reduce token count."""
     try:
         from bs4 import BeautifulSoup
-    except Exception:
-        return []
+    except ImportError:
+        return html_text
 
     soup = BeautifulSoup(html_text, "html.parser")
-    result: List[str] = []
 
-    for a_tag in soup.find_all("a", href=True):
-        href = str(a_tag.get("href", "")).strip()
-        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
-            continue
-        abs_url = urldefrag(urljoin(base_url, href))[0]
-        parsed = urlparse(abs_url)
-        if parsed.scheme not in {"http", "https"}:
-            continue
-        if not _is_probably_html_url(abs_url):
-            continue
-        result.append(abs_url)
+    for tag_name in [
+        "script", "style", "noscript", "svg", "iframe",
+        "nav", "footer", "header", "aside",
+        "link", "meta",
+    ]:
+        for tag in soup.find_all(tag_name):
+            tag.decompose()
 
-    seen: Set[str] = set()
-    uniq: List[str] = []
-    for link in result:
-        if link not in seen:
-            seen.add(link)
-            uniq.append(link)
-    return uniq
+    for tag in soup.find_all(True):
+        tag.attrs = {}
 
-
-def _quality_score(text: str) -> float:
-    if not text.strip():
-        return 0.0
-
-    normalized = _normalize_text(text)
-    chars = len(normalized)
-    if chars == 0:
-        return 0.0
-
-    words = re.findall(r"[a-zа-яё0-9]+", normalized.lower())
-    unique_ratio = len(set(words)) / max(1, len(words))
-    sentence_count = len(re.findall(r"[.!?]", normalized))
-    punctuation_ratio = len(re.findall(r"[,.!?;:]", normalized)) / max(1, chars)
-    nav_hits = sum(1 for w in _NAV_WORDS if w in normalized.lower())
-    noise_hits = sum(1 for p in _NOISY_PATTERNS if p in normalized.lower())
-
-    score = 0.0
-    score += min(chars / 5000.0, 1.0) * 0.45
-    score += min(sentence_count / 45.0, 1.0) * 0.20
-    score += min(unique_ratio / 0.75, 1.0) * 0.20
-    score += min(punctuation_ratio / 0.03, 1.0) * 0.15
-    score -= min(nav_hits / 10.0, 0.20)
-    score -= min(noise_hits / 8.0, 0.16)
-
-    return max(0.0, min(1.0, score))
-
-
-def _extract_with_trafilatura(
-    html_text: str, url: str, *, prefer_precision: bool = True,
-) -> str:
-    try:
-        import trafilatura
-
-        extracted = trafilatura.extract(
-            html_text,
-            url=url,
-            output_format="txt",
-            include_links=False,
-            include_comments=False,
-            favor_precision=prefer_precision,
-        )
-        return _normalize_text(extracted or "")
-    except Exception:
-        return ""
-
-
-def _extract_with_readability(html_text: str) -> str:
-    try:
-        from readability import Document
-        from bs4 import BeautifulSoup
-
-        doc = Document(html_text)
-        article_html = doc.summary(html_partial=True)
-        soup = BeautifulSoup(article_html, "html.parser")
-        return _normalize_text(soup.get_text("\n"))
-    except Exception:
-        return ""
-
-
-def _extract_with_bs4_main_content(html_text: str) -> str:
-    try:
-        from bs4 import BeautifulSoup
-    except Exception:
-        return ""
-
-    try:
-        soup = BeautifulSoup(html_text, "html.parser")
-        for selector in [
-            "script", "style", "noscript", "svg", "iframe",
-            "nav", "footer", "header", "aside",
-        ]:
-            for tag in soup.select(selector):
-                tag.decompose()
-
-        candidates = [
-            soup.select_one("main"),
-            soup.select_one("article"),
-            soup.select_one("[role='main']"),
-            soup.select_one("#mw-content-text"),
-            soup.select_one(".mw-parser-output"),
-            soup.select_one("#content"),
-            soup.body,
-        ]
-        for node in candidates:
-            if node is None:
-                continue
-            text = _normalize_text(node.get_text("\n"))
-            if len(text) >= 180:
-                return text
-        return ""
-    except Exception:
-        return ""
-
-
-def _extract_with_bs4_raw(html_text: str) -> str:
-    try:
-        from bs4 import BeautifulSoup
-
-        soup = BeautifulSoup(html_text, "html.parser")
-        for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
-            tag.extract()
-        return _normalize_text(soup.get_text("\n"))
-    except Exception:
-        return ""
-
-
-def _pick_best_extraction(
-    html_text: str, url: str,
-) -> _ExtractionResult:
-    candidates: List[_ExtractionResult] = []
-
-    def _push(text: str, extractor: str, bonus: float = 0.0) -> None:
-        cleaned = _normalize_text(text)
-        if len(cleaned) < 80:
-            return
-        base_score = _quality_score(cleaned)
-        candidates.append(_ExtractionResult(
-            text=cleaned,
-            extractor=extractor,
-            score=max(0.0, min(1.0, base_score + bonus)),
-        ))
-
-    _push(_extract_with_trafilatura(html_text, url), "trafilatura")
-    _push(_extract_with_readability(html_text), "readability")
-    _push(_extract_with_bs4_main_content(html_text), "bs4-main", bonus=0.06)
-    _push(_extract_with_bs4_raw(html_text), "bs4-raw")
-
-    if not candidates:
-        return _ExtractionResult(text="", extractor="none", score=0.0)
-
-    candidates.sort(key=lambda c: c.score, reverse=True)
-    return candidates[0]
+    cleaned = soup.get_text("\n")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return cleaned.strip()
 
 
 def _fetch_with_retry(
     client: httpx.Client, url: str, *, retries: int, backoff_sec: float,
 ) -> Optional[httpx.Response]:
+    import time
+
     for attempt in range(retries + 1):
         try:
             resp = client.get(url)
@@ -302,139 +122,75 @@ def _fetch_with_retry(
     return None
 
 
-def _get_robot_parser(target_url: str) -> Optional[RobotFileParser]:
-    parsed = urlparse(target_url)
-    root = f"{parsed.scheme}://{parsed.netloc}"
-    if root in _ROBOTS_CACHE:
-        return _ROBOTS_CACHE[root]
+def _refine_with_llm(precleaned_text: str, url: str) -> str:
+    """Send pre-cleaned HTML text to LLM for structuring."""
+    max_chars = 60_000
+    text_to_send = precleaned_text[:max_chars]
 
-    robots_url = f"{root}/robots.txt"
-    rp = RobotFileParser()
-    rp.set_url(robots_url)
+    prompt = (
+        f"URL страницы: {url}\n\n"
+        f"Содержимое страницы:\n\n{text_to_send}"
+    )
+
     try:
-        rp.read()
-    except Exception:
-        _ROBOTS_CACHE[root] = None
-        return None
-    _ROBOTS_CACHE[root] = rp
-    return rp
+        result = generate_text(
+            prompt=prompt,
+            system=_LLM_SYSTEM_PROMPT,
+            temperature=0.1,
+            max_tokens=4096,
+        )
+        return result.strip()
+    except Exception as exc:
+        log.error("LLM refinement failed for %s: %s", url, exc)
+        return precleaned_text
 
 
-def _allowed_by_robots(url: str, user_agent: str) -> bool:
-    rp = _get_robot_parser(url)
-    if rp is None:
-        return True
-    try:
-        return rp.can_fetch(user_agent, url)
-    except Exception:
-        return True
-
-
-def parse_website(
-    seed_url: str,
+def parse_page(
+    url: str,
     *,
     config: Optional[ParserConfig] = None,
-) -> List[ParsedPage]:
+) -> ParsedPage:
+    """Fetch a single page, pre-clean HTML, refine with LLM, return structured text."""
     cfg = config or ParserConfig()
-    start_url = _normalize_url(seed_url)
-    start_domain = urlparse(start_url).netloc.lower()
-
-    queue: Deque[Tuple[str, int]] = deque([(start_url, 0)])
-    visited: Set[str] = set()
-    pages: List[ParsedPage] = []
+    normalized_url = _normalize_url(url)
     headers = {"User-Agent": cfg.user_agent}
 
     with httpx.Client(
         follow_redirects=True, timeout=cfg.timeout_sec, headers=headers,
     ) as client:
-        while queue and len(pages) < cfg.max_pages:
-            current_url, depth = queue.popleft()
-            current_url = urldefrag(current_url)[0]
-
-            if current_url in visited:
-                continue
-            visited.add(current_url)
-
-            if cfg.respect_robots and not _allowed_by_robots(
-                current_url, cfg.user_agent,
-            ):
-                continue
-
-            response = _fetch_with_retry(
-                client, current_url,
-                retries=cfg.retries, backoff_sec=cfg.backoff_sec,
-            )
-            if response is None or response.status_code >= 400:
-                continue
-
-            ctype = response.headers.get("content-type", "").lower()
-            if "html" not in ctype:
-                continue
-
-            html_text = response.text
-            title = _extract_title(
-                html_text,
-                fallback=urlparse(current_url).path.strip("/") or "untitled",
-            )
-
-            picked = _pick_best_extraction(html_text, current_url)
-
-            if len(picked.text) >= cfg.min_chars:
-                pages.append(ParsedPage(
-                    url=current_url,
-                    title=title,
-                    text=picked.text,
-                    extractor=picked.extractor,
-                    quality_score=round(picked.score, 4),
-                    depth=depth,
-                    meta={
-                        "status_code": response.status_code,
-                        "content_type": ctype,
-                    },
-                ))
-
-            if depth < cfg.max_depth:
-                links = _extract_links(html_text, current_url)
-                for link in links:
-                    if link not in visited:
-                        if not cfg.same_domain or urlparse(
-                            link,
-                        ).netloc.lower() == start_domain:
-                            queue.append((link, depth + 1))
-
-    return pages
-
-
-def write_pages_to_txt(pages: List[ParsedPage], folder: Path) -> List[Path]:
-    folder.mkdir(parents=True, exist_ok=True)
-    paths: List[Path] = []
-    for idx, page in enumerate(pages, 1):
-        fallback = f"page_{idx:03d}"
-        name = _sanitize_filename(page.title, fallback=fallback)
-        file_path = folder / f"{idx:03d}_{name}.txt"
-        header = (
-            f"URL: {page.url}\n"
-            f"TITLE: {page.title}\n"
-            f"EXTRACTOR: {page.extractor}\n"
-            f"QUALITY_SCORE: {page.quality_score}\n"
-            f"DEPTH: {page.depth}\n\n"
+        response = _fetch_with_retry(
+            client, normalized_url,
+            retries=cfg.retries, backoff_sec=cfg.backoff_sec,
         )
-        file_path.write_text(header + page.text + "\n", encoding="utf-8")
-        paths.append(file_path)
-    return paths
 
+    if response is None:
+        raise ValueError(f"Failed to fetch URL: {normalized_url}")
 
-def summarize_extractors(
-    pages: List[ParsedPage],
-) -> Dict[str, Any]:
-    total = len(pages)
-    by_extractor = Counter(p.extractor for p in pages)
-    avg_quality = (
-        round(sum(p.quality_score for p in pages) / total, 4)
-        if total else 0.0
+    if response.status_code >= 400:
+        raise ValueError(
+            f"HTTP {response.status_code} for URL: {normalized_url}"
+        )
+
+    ctype = response.headers.get("content-type", "").lower()
+    if "html" not in ctype:
+        raise ValueError(f"Not an HTML page (content-type: {ctype})")
+
+    html_text = response.text
+    title = _extract_title(
+        html_text,
+        fallback=urlparse(normalized_url).path.strip("/") or "untitled",
     )
-    return {
-        "total_pages": total,
-        "avg_quality": avg_quality,
-        "extractors": dict(by_extractor),
-    }
+
+    precleaned = _preclean_html(html_text)
+
+    structured_text = _refine_with_llm(precleaned, normalized_url)
+
+    return ParsedPage(
+        url=normalized_url,
+        title=title,
+        text=structured_text,
+        meta={
+            "status_code": response.status_code,
+            "content_type": ctype,
+        },
+    )
