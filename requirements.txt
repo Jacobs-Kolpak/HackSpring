@@ -34,6 +34,11 @@ httpx>=0.27,<1
 # ── Presentation ──────────────────────────────────────────
 python-pptx>=1.0,<2
 
+# ── Web Parser ───────────────────────────────────────────
+beautifulsoup4>=4.12,<5
+trafilatura>=1.6,<2
+readability-lxml>=0.8,<1
+
 # ── Audio / TTS (Silero) ──────────────────────────────────
 torch>=2.1.0
 numpy>=1.24.0
