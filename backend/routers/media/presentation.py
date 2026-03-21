@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from backend.services import presentation as pres_service
-from backend.services import rag as rag_service
+from backend.services.media import presentation as pres_service
+from backend.services.rag import service as rag_service
 
 router = APIRouter(prefix="/api/jacobs/presentation", tags=["Presentation"])
 

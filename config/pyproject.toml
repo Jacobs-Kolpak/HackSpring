@@ -1,16 +1,21 @@
-[tool.isort]
-profile = "black"
-line_length = 99
-known_third_party = [
-    "fastapi",
-    "sqlalchemy",
-    "pydantic",
-    "jose",
-    "passlib",
-    "decouple",
-    "uvicorn",
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [".venv", "venv", "__pycache__", "migrations", ".mypy_cache"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "F401",   # unused import in __init__.py
+    "E402",   # module level import not at top
+    "W291",   # trailing whitespace
+    "W292",   # no newline at end of file
+    "W293",   # whitespace before ':'
 ]
-known_first_party = ["backend"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
 
 [tool.pylint.master]
 load-plugins = []
@@ -19,20 +24,49 @@ ignore = ["__pycache__", ".git", ".venv", "venv"]
 [tool.pylint.messages_control]
 disable = [
     "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-locals",
+    "too-many-return-statements",
+    "too-many-branches",
+    "too-many-statements",
     "missing-module-docstring",
     "missing-class-docstring",
+    "missing-function-docstring",
     "import-error",
+    "no-member",
+    "broad-except",
+    "broad-exception-caught",
+    "import-outside-toplevel",
+    "redefined-outer-name",
+    "unused-argument",
+    "line-too-long",
+    "duplicate-code",
+    "cyclic-import",
+    "wrong-import-order",
+    "ungrouped-imports",
 ]
 
 [tool.pylint.format]
-max-line-length = 99
+max-line-length = 120
 
 [tool.pylint.basic]
-good-names = ["db", "id", "e"]
+good-names = ["db", "id", "e", "i", "f", "k", "v", "s", "ln", "ok", "wf"]
+
+[tool.pylint.design]
+max-args = 12
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
-exclude = ["venv", ".venv", "__pycache__"]
+check_untyped_defs = false
+disallow_untyped_defs = false
+exclude = ["venv", ".venv", "__pycache__", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

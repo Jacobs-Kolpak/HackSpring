@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from backend.services import table as table_service
+from backend.services.content import table as table_service
 from backend.utils.document_reader import read_document
 
 router = APIRouter(prefix="/api/jacobs/table", tags=["Table"])

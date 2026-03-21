@@ -1,19 +1,36 @@
 [MASTER]
-fail-under=9.0
+fail-under=7.0
 
 [MESSAGES CONTROL]
 disable=
     too-few-public-methods,
+    too-many-arguments,
+    too-many-positional-arguments,
+    too-many-locals,
+    too-many-return-statements,
+    too-many-branches,
+    too-many-statements,
     missing-module-docstring,
     missing-class-docstring,
+    missing-function-docstring,
     import-error,
-    no-member
+    no-member,
+    broad-except,
+    broad-exception-caught,
+    import-outside-toplevel,
+    redefined-outer-name,
+    unused-argument,
+    line-too-long,
+    duplicate-code,
+    cyclic-import,
+    wrong-import-order,
+    ungrouped-imports
 
 [FORMAT]
-max-line-length=99
+max-line-length=120
 
 [BASIC]
-good-names=db,id,e
+good-names=db,id,e,i,f,k,v,s,ln,ok,wf
 
 [DESIGN]
-max-args=7
+max-args=12

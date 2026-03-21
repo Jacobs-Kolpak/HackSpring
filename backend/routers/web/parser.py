@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.services import parser as parser_service
+from backend.services.web import parser as parser_service
 
 router = APIRouter(prefix="/api/jacobs/parser", tags=["Parser"])
 

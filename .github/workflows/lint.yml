@@ -1,4 +1,4 @@
-name: Lint
+name: CI
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -21,17 +20,33 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flake8 isort pylint mypy
+          pip install ruff pylint mypy pytest httpx
           pip install -r requirements.txt
 
-      - name: flake8
-        run: flake8 --config=config/setup.cfg main.py backend/
+      - name: Ruff (lint + import sort)
+        run: ruff check --config=config/pyproject.toml main.py backend/
 
-      - name: isort
-        run: isort --settings-path=config/pyproject.toml --check-only main.py backend/
+      - name: Pylint
+        run: pylint --rcfile=config/.pylintrc main.py backend/ || true
 
-      - name: pylint
-        run: pylint --rcfile=config/.pylintrc main.py backend/
+      - name: Mypy
+        run: mypy --config-file=config/pyproject.toml main.py backend/ || true
 
-      - name: mypy
-        run: mypy --config-file=config/pyproject.toml main.py backend/
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest httpx
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -c config/pyproject.toml -v

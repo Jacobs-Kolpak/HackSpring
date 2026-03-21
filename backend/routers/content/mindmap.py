@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from backend.services.mindmap import build_graph_data
+from backend.services.content.mindmap import build_graph_data
 from backend.utils.document_reader import SUPPORTED_EXTENSIONS, read_document
 
 router = APIRouter(prefix="/api/jacobs/mindmap", tags=["Mindmap"])

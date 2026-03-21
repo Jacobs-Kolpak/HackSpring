@@ -48,5 +48,9 @@ silero
 numpy>=1.24.0
 omegaconf>=2.3.0
 
-# ── Video generation (slides + ffmpeg) ───────────────────
+# ── Image (slides for video/presentation) ────────────────
 Pillow>=10.0.0
+
+# ── Testing & Linting ───────────────────────────────────
+pytest>=8.0
+ruff>=0.4

@@ -60,7 +60,7 @@ def parse_and_ingest(
     chunk_size: Optional[int] = None,
     chunk_overlap: Optional[int] = None,
 ) -> Dict[str, Any]:
-    from backend.services import rag as rag_service
+    from backend.services.rag import service as rag_service
 
     cfg = ParserConfig(
         max_pages=max_pages,

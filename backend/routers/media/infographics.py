@@ -5,8 +5,8 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.services import infographic as infographic_service
-from backend.services import rag as rag_service
+from backend.services.media import infographic as infographic_service
+from backend.services.rag import service as rag_service
 
 router = APIRouter(prefix="/api/jacobs/infographics", tags=["Infographics"])
 

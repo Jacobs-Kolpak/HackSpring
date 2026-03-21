@@ -9,8 +9,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.services import podcast as podcast_service
-from backend.services.podcast import (
+from backend.services.media import podcast as podcast_service
+from backend.services.media.podcast import (
     AVAILABLE_SPEAKERS,
     PodcastConfig,
     normalize_pace,

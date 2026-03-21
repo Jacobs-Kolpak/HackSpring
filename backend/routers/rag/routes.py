@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-from backend.services import rag as rag_service
+from backend.services.rag import service as rag_service
 from backend.utils.document_reader import SUPPORTED_EXTENSIONS
 
 router = APIRouter(prefix="/api/jacobs/rag", tags=["RAG"])

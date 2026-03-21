@@ -80,12 +80,6 @@ class InfographicSettings(BaseSettings):
     max_model_candidates: int = 8
 
 
-class VideoSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="VIDEO_", extra="ignore")
-
-    output_dir: str = str(BASE_DIR / "data" / "video")
-
-
 class PresentationSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PRESENTATION_", extra="ignore")
 
@@ -143,10 +137,6 @@ class Settings(BaseSettings):
     @cached_property
     def infographic(self) -> InfographicSettings:
         return InfographicSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
-
-    @cached_property
-    def video(self) -> VideoSettings:
-        return VideoSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
     @cached_property
     def presentation(self) -> PresentationSettings:
