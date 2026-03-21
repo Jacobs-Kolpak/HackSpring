@@ -3,14 +3,19 @@ from __future__ import annotations
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.services import podcast as podcast_service
-from backend.services.podcast import PodcastConfig, normalize_pace, normalize_tone
+from backend.services.podcast import (
+    AVAILABLE_SPEAKERS,
+    PodcastConfig,
+    normalize_pace,
+    normalize_tone,
+)
 from backend.utils.document_reader import SUPPORTED_EXTENSIONS, read_document
 
 router = APIRouter(prefix="/api/jacobs/podcast", tags=["Podcast"])
@@ -27,23 +32,48 @@ class DialogueResponse(BaseModel):
     meta: Dict[str, Any] = {}
 
 
-def _make_config(tone: str, pace: str) -> PodcastConfig:
+class SpeakersResponse(BaseModel):
+    speakers: List[str]
+
+
+def _make_config(
+    tone: str,
+    pace: str,
+    speaker_1: str = "baya",
+    speaker_2: str = "xenia",
+) -> PodcastConfig:
     return PodcastConfig(
         tone=normalize_tone(tone),
         pace=normalize_pace(pace),
+        silero_speaker_1=speaker_1,
+        silero_speaker_2=speaker_2,
     )
 
 
-def _try_audio(dialogue: str, pace: str) -> tuple[bool, Optional[str]]:
+def _try_audio(
+    dialogue: str,
+    pace: str,
+    speaker_1: str = "baya",
+    speaker_2: str = "xenia",
+) -> tuple[bool, Optional[str]]:
     _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     filename = f"podcast_{uuid.uuid4().hex[:12]}.wav"
     audio_path = _AUDIO_DIR / filename
     ok = podcast_service.save_audio(
-        dialogue, audio_path, pace=normalize_pace(pace)
+        dialogue,
+        audio_path,
+        pace=normalize_pace(pace),
+        silero_speaker_1=speaker_1,
+        silero_speaker_2=speaker_2,
     )
     if ok:
         return True, f"/api/jacobs/podcast/audio/{filename}"
     return False, None
+
+
+@router.get("/speakers", response_model=SpeakersResponse)
+async def list_speakers() -> SpeakersResponse:
+    return SpeakersResponse(speakers=AVAILABLE_SPEAKERS)
 
 
 @router.post("/file", response_model=DialogueResponse)
@@ -52,6 +82,8 @@ async def from_file(
     topic: str = Form("Без названия"),
     tone: str = Form("scientific"),
     pace: str = Form("normal"),
+    speaker_1: str = Form("baya"),
+    speaker_2: str = Form("xenia"),
     model: Optional[str] = Form(None),
 ) -> DialogueResponse:
     ext = Path(file.filename or "").suffix.lower()
@@ -59,7 +91,7 @@ async def from_file(
         raise HTTPException(status_code=400, detail="Неподдерживаемый формат")
 
     try:
-        cfg = _make_config(tone, pace)
+        cfg = _make_config(tone, pace, speaker_1, speaker_2)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -80,7 +112,7 @@ async def from_file(
     dialogue = podcast_service.generate_dialogue(
         text, topic=topic, config=cfg, model=used_model
     )
-    has_audio, audio_url = _try_audio(dialogue, pace)
+    has_audio, audio_url = _try_audio(dialogue, pace, speaker_1, speaker_2)
 
     return DialogueResponse(
         dialogue=dialogue,
@@ -88,7 +120,7 @@ async def from_file(
         model=used_model,
         has_audio=has_audio,
         audio_url=audio_url,
-        meta={"filename": file.filename},
+        meta={"filename": file.filename, "speakers": [speaker_1, speaker_2]},
     )
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import tempfile
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,11 @@ from backend.utils.llm import generate_text
 class PodcastConfig:
     tone: str = "scientific"
     pace: str = "normal"
+    silero_speaker_1: str = "baya"
+    silero_speaker_2: str = "xenia"
 
+
+AVAILABLE_SPEAKERS = ["aidar", "baya", "eugene", "kseniya", "xenia"]
 
 _TONE_MAP = {
     "scientific": "scientific", "science": "scientific",
@@ -29,6 +32,9 @@ _PACE_MAP = {
     "normal": "normal", "нормально": "normal",
     "fast": "fast", "быстро": "fast",
 }
+
+_silero_model = None
+_silero_sample_rate = 48000
 
 
 def normalize_tone(value: str) -> str:
@@ -51,6 +57,35 @@ def normalize_pace(value: str) -> str:
     return _PACE_MAP[key]
 
 
+def _clean_source(text: str) -> str:
+    normalized = re.sub(r"[-‐‑]\s*\n\s*", "", text)
+    normalized = normalized.replace("\n", " ")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    normalized = re.sub(r"([.!?])([А-ЯA-Z])", r"\1 \2", normalized)
+    normalized = re.sub(r"([a-zа-я])([A-ZА-Я])", r"\1 \2", normalized)
+    normalized = re.sub(r"([A-Za-z])([А-Яа-я])", r"\1 \2", normalized)
+    normalized = re.sub(r"([А-Яа-я])([A-Za-z])", r"\1 \2", normalized)
+    normalized = re.sub(r"\b\d+\s*$", "", normalized)
+    return normalized
+
+
+def _prepare_source(text: str) -> str:
+    clean = _clean_source(text)
+    parts = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
+    selected = []
+    for sentence in parts:
+        if len(sentence) < 25:
+            continue
+        if re.fullmatch(r"[\W\d_]+", sentence):
+            continue
+        selected.append(sentence)
+        if len(selected) >= 18:
+            break
+    if not selected:
+        return clean[:3500]
+    return " ".join(selected)[:3500]
+
+
 def generate_dialogue(
     text: str,
     *,
@@ -59,7 +94,7 @@ def generate_dialogue(
     model: Optional[str] = None,
 ) -> str:
     cfg = config or PodcastConfig()
-    cleaned = re.sub(r"\s+", " ", text).strip()
+    cleaned = _prepare_source(text)
     if not cleaned:
         raise ValueError("Пустой текст для генерации диалога.")
 
@@ -69,13 +104,16 @@ def generate_dialogue(
     }.get(cfg.pace, "средний")
 
     prompt = (
-        "Сделай диалог двух ведущих по этому тексту.\n"
+        "Сделай читаемый диалог двух ведущих по этому тексту.\n"
         f"Стиль: {tone_hint}.\n"
         f"Темп речи: {pace_hint}.\n"
-        "Формат строк: только 'Ведущий 1: ...' и 'Ведущий 2: ...'.\n"
-        "Минимум 8 реплик.\n"
+        "Требования:\n"
+        "- Только русский язык, без латиницы и обрывков слов.\n"
+        "- 30-35 реплик, короткие и понятные.\n"
+        "- Каждая строка строго начинается с 'Ведущий 1:' или 'Ведущий 2:'.\n"
+        "- Не вставляй служебный текст, JSON, комментарии и номера страниц.\n"
         f"Тема: {topic}.\n"
-        f"Текст:\n{cleaned[:6000]}\n"
+        f"Текст:\n{cleaned}\n"
         "Диалог:"
     )
     raw = generate_text(
@@ -139,61 +177,6 @@ def _is_low_quality(dialogue: str) -> bool:
     return not (has_1 and has_2)
 
 
-def save_audio(
-    dialogue: str,
-    output_path: Path,
-    pace: str = "normal",
-) -> bool:
-    try:
-        import pyttsx3  # pylint: disable=import-outside-toplevel
-    except ImportError:
-        return False
-
-    try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        engine = pyttsx3.init()
-
-        base_rate = engine.getProperty("rate") or 180
-        factor = {"slow": 0.85, "normal": 1.0, "fast": 1.2}.get(pace, 1.0)
-        tts_rate = int(base_rate * factor)
-
-        chunks = _split_for_tts(dialogue)
-        if not chunks:
-            engine.setProperty("rate", tts_rate)
-            clean = re.sub(r"Ведущий\s*[12]\s*:", "", dialogue)
-            engine.save_to_file(clean, str(output_path))
-            engine.runAndWait()
-            return output_path.exists() and output_path.stat().st_size > 0
-
-        voices = engine.getProperty("voices") or []
-        voice_1, voice_2 = _pick_voices(voices)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            temp_files: List[Path] = []
-            for idx, (speaker, text_part) in enumerate(chunks, start=1):
-                tmp_file = Path(tmpdir) / f"part_{idx:03d}.wav"
-                engine.setProperty("rate", tts_rate)
-                if speaker == 1 and voice_1:
-                    engine.setProperty("voice", voice_1)
-                elif speaker == 2 and voice_2:
-                    engine.setProperty("voice", voice_2)
-                engine.save_to_file(text_part, str(tmp_file))
-                temp_files.append(tmp_file)
-            engine.runAndWait()
-
-            if _concat_wav(temp_files, output_path):
-                return True
-
-        engine = pyttsx3.init()
-        engine.setProperty("rate", tts_rate)
-        clean = re.sub(r"Ведущий\s*[12]\s*:", "", dialogue)
-        engine.save_to_file(clean, str(output_path))
-        engine.runAndWait()
-        return output_path.exists() and output_path.stat().st_size > 0
-    except Exception:  # pylint: disable=broad-except
-        return False
-
-
 def _split_for_tts(
     dialogue: str,
 ) -> List[Tuple[int, str]]:
@@ -208,36 +191,85 @@ def _split_for_tts(
     return chunks
 
 
-def _pick_voices(
-    voices: list,
-) -> Tuple[Optional[str], Optional[str]]:
-    if not voices:
-        return None, None
-    if len(voices) == 1:
-        vid = getattr(voices[0], "id", None)
-        return vid, vid
-    return getattr(voices[0], "id", None), getattr(voices[1], "id", None)
-
-
-def _concat_wav(parts: List[Path], output_path: Path) -> bool:
-    valid = [p for p in parts if p.exists() and p.stat().st_size > 44]
-    if not valid:
-        return False
+def _load_silero_model():  # type: ignore[no-untyped-def]
+    global _silero_model, _silero_sample_rate  # noqa: PLW0603
+    if _silero_model is not None:
+        return _silero_model, _silero_sample_rate
     try:
-        with wave.open(str(valid[0]), "rb") as first:
-            params = first.getparams()
-            frames = [first.readframes(first.getnframes())]
-        for path in valid[1:]:
-            with wave.open(str(path), "rb") as wf:
-                if (wf.getnchannels() != params.nchannels
-                        or wf.getframerate() != params.framerate):
-                    continue
-                frames.append(wf.readframes(wf.getnframes()))
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with wave.open(str(output_path), "wb") as out:
-            out.setparams(params)
-            for data in frames:
-                out.writeframes(data)
-        return output_path.exists() and output_path.stat().st_size > 44
+        import torch  # pylint: disable=import-outside-toplevel
+
+        model, _ = torch.hub.load(
+            repo_or_dir="snakers4/silero-models",
+            model="silero_tts",
+            language="ru",
+            speaker="v4_ru",
+            trust_repo=True,
+        )
+        _silero_model = model
+        _silero_sample_rate = 48000
+        return _silero_model, _silero_sample_rate
     except Exception:  # pylint: disable=broad-except
+        return None, None
+
+
+def save_audio(
+    dialogue: str,
+    output_path: Path,
+    pace: str = "normal",
+    silero_speaker_1: str = "baya",
+    silero_speaker_2: str = "xenia",
+) -> bool:
+    _ = pace
+    try:
+        import numpy as np  # pylint: disable=import-outside-toplevel
+    except ImportError:
         return False
+
+    model, sample_rate = _load_silero_model()
+    if model is None or sample_rate is None:
+        return False
+
+    chunks = _split_for_tts(dialogue)
+    if not chunks:
+        clean = re.sub(r"Ведущий\s*[12]\s*:\s*", "", dialogue).strip()
+        chunks = [(1, clean)] if clean else []
+
+    wav_parts: list = []
+    pause = np.zeros(int(0.14 * sample_rate), dtype=np.float32)
+
+    for speaker_id, text_part in chunks:
+        text_part = text_part.strip()
+        if not text_part:
+            continue
+
+        speaker = silero_speaker_1 if speaker_id == 1 else silero_speaker_2
+        try:
+            audio = model.apply_tts(
+                text=text_part,
+                speaker=speaker,
+                sample_rate=sample_rate,
+                put_accent=True,
+                put_yo=True,
+            )
+        except Exception:  # pylint: disable=broad-except
+            return False
+
+        wav = audio.detach().cpu().numpy().astype(np.float32)
+        wav_parts.append(wav)
+        wav_parts.append(pause)
+
+    if not wav_parts:
+        return False
+
+    full_audio = np.concatenate(wav_parts)
+    full_audio = np.clip(full_audio, -1.0, 1.0)
+    wav_int16 = (full_audio * 32767.0).astype(np.int16)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(output_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(wav_int16.tobytes())
+
+    return output_path.exists() and output_path.stat().st_size > 44
