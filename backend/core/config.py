@@ -1,5 +1,3 @@
-"""Единый конфиг проекта. Читает .env и предоставляет типизированные настройки."""
-
 from __future__ import annotations
 
 import json
@@ -14,12 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 _ENV_FILE = str(BASE_DIR / ".env")
 
 
-# ── Вложенные секции ────────────────────────────────────────
-
-
 class LLMSettings(BaseSettings):
-    """Настройки LLM-провайдера."""
-
     model_config = SettingsConfigDict(env_prefix="LLM_", extra="ignore")
 
     provider: str = "openai"
@@ -31,8 +24,6 @@ class LLMSettings(BaseSettings):
 
 
 class RAGSettings(BaseSettings):
-    """Настройки RAG-пайплайна."""
-
     model_config = SettingsConfigDict(env_prefix="RAG_", extra="ignore")
 
     chunk_size: int = 900
@@ -53,8 +44,6 @@ class RAGSettings(BaseSettings):
 
 
 class TTSSettings(BaseSettings):
-    """Настройки Text-to-Speech."""
-
     model_config = SettingsConfigDict(env_prefix="TTS_", extra="ignore")
 
     engine: str = "silero"
@@ -65,8 +54,6 @@ class TTSSettings(BaseSettings):
 
 
 class UploadSettings(BaseSettings):
-    """Настройки загрузки файлов."""
-
     model_config = SettingsConfigDict(env_prefix="UPLOAD_", extra="ignore")
 
     max_size_mb: int = 50
@@ -75,21 +62,14 @@ class UploadSettings(BaseSettings):
 
     @property
     def allowed_extensions_list(self) -> List[str]:
-        """Список допустимых расширений."""
         return [ext.strip() for ext in self.allowed_extensions.split(",")]
 
     @property
     def max_size_bytes(self) -> int:
-        """Максимальный размер в байтах."""
         return self.max_size_mb * 1024 * 1024
 
 
-# ── Главный Settings ────────────────────────────────────────
-
-
 class Settings(BaseSettings):
-    """Корневые настройки приложения."""
-
     model_config = SettingsConfigDict(
         env_file=_ENV_FILE,
         env_file_encoding="utf-8",
@@ -106,7 +86,6 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _parse_cors(cls, v: object) -> object:  # noqa: N805
-        """Парсит CORS_ORIGINS из JSON-строки."""
         if isinstance(v, str):
             return json.loads(v)
         return v
@@ -121,22 +100,18 @@ class Settings(BaseSettings):
 
     @cached_property
     def llm(self) -> LLMSettings:
-        """Настройки LLM."""
         return LLMSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
     @cached_property
     def rag(self) -> RAGSettings:
-        """Настройки RAG."""
         return RAGSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
     @cached_property
     def tts(self) -> TTSSettings:
-        """Настройки TTS."""
         return TTSSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
     @cached_property
     def upload(self) -> UploadSettings:
-        """Настройки загрузки файлов."""
         return UploadSettings(_env_file=_ENV_FILE)  # type: ignore[call-arg]
 
 

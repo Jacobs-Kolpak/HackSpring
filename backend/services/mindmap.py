@@ -1,5 +1,3 @@
-"""Генерация mind map — граф концептов из текста."""
-
 from __future__ import annotations
 
 import html
@@ -78,13 +76,11 @@ def build_graph_data(  # pylint: disable=too-many-locals
     min_freq: int = 2,
     min_edge: int = 1,
 ) -> Dict[str, List[Dict]]:
-    """Строит граф концептов: ``{"nodes": [...], "edges": [...]}``."""
     freq = Counter(_tokenize(text))
     sents = _sentences(text)
     if not freq:
         return {"nodes": [], "edges": []}
 
-    # Широкий пул → ранжирование → top_n
     pool = sorted(
         ((t, c) for t, c in freq.items() if c >= min_freq),
         key=lambda x: (-x[1], x[0]),
@@ -136,7 +132,6 @@ def render_html(
     min_freq: int = 2,
     min_edge: int = 1,
 ) -> Tuple[int, int]:
-    """Генерирует интерактивный HTML mind map."""
     graph = build_graph_data(text, top_n=top_n, min_freq=min_freq, min_edge=min_edge)
     output.parent.mkdir(parents=True, exist_ok=True)
     safe = html.escape(title)

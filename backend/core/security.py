@@ -1,5 +1,3 @@
-"""JWT-токены и хеширование паролей."""
-
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Union
 
@@ -12,7 +10,6 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
-    """Хеширует пароль через bcrypt."""
     raw: Union[str, bytes] = password
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
@@ -23,7 +20,6 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Проверяет пароль."""
     raw: Union[str, bytes] = plain_password
     if isinstance(raw, str):
         raw = raw.encode("utf-8")
@@ -37,7 +33,6 @@ def create_access_token(
     data: Dict[str, Any],
     expires_delta: Optional[timedelta] = None,
 ) -> str:
-    """Создаёт JWT access token."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (
         expires_delta
@@ -54,7 +49,6 @@ def create_refresh_token(
     data: Dict[str, Any],
     expires_delta: Optional[timedelta] = None,
 ) -> str:
-    """Создаёт JWT refresh token."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (
         expires_delta
@@ -68,7 +62,6 @@ def create_refresh_token(
 
 
 def create_tokens(user_email: str) -> Dict[str, str]:
-    """Создаёт пару access + refresh токенов."""
     return {
         "access_token": create_access_token(data={"sub": user_email}),
         "refresh_token": create_refresh_token(data={"sub": user_email}),
@@ -79,7 +72,6 @@ def create_tokens(user_email: str) -> Dict[str, str]:
 def verify_token(
     token: str, expected_token_type: str = "access"
 ) -> Optional[str]:
-    """Проверяет JWT и возвращает email."""
     try:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]

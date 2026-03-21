@@ -1,5 +1,3 @@
-"""Получение эмбеддингов: local fastembed или remote OpenAI-compatible API."""
-
 from __future__ import annotations
 
 import os
@@ -15,7 +13,6 @@ def resolve_api_key(
     primary: Optional[str],
     fallback_envs: Optional[List[str]] = None,
 ) -> Optional[str]:
-    """Ищет API-ключ: primary → env-переменные."""
     if primary:
         return primary
     for name in fallback_envs or []:
@@ -26,7 +23,6 @@ def resolve_api_key(
 
 
 def normalize_base_url(url: str) -> str:
-    """Добавляет /v1 к base_url если нужно."""
     base = url.rstrip("/")
     if not base.endswith("/v1"):
         base = f"{base}/v1"
@@ -39,7 +35,6 @@ def get_embedder(
     embedder_url: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Создаёт embedder: remote API или local fastembed."""
     if embedder_url:
         from openai import OpenAI  # pylint: disable=import-outside-toplevel
 
@@ -73,7 +68,6 @@ def embed_texts(
     *,
     is_query: bool = False,
 ) -> List[List[float]]:
-    """Эмбеддит тексты через выбранный embedder."""
     prepared = [_prepare(t, model_name, is_query) for t in texts]
 
     if embedder["kind"] == "api":

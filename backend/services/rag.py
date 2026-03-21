@@ -1,10 +1,3 @@
-"""
-RAG-сервис: ingest, retrieve, ask.
-
-Объединяет vector store (Qdrant), гибридный rerank и LLM-генерацию.
-Все настройки берёт из settings.rag / settings.llm.
-"""
-
 from __future__ import annotations
 
 import re
@@ -22,8 +15,6 @@ from backend.utils.embeddings import (
     normalize_base_url,
     resolve_api_key,
 )
-
-# ── Qdrant helpers ──────────────────────────────────────────
 
 
 def _get_client() -> QdrantClient:
@@ -56,21 +47,12 @@ def _get_embedder():  # type: ignore[no-untyped-def]
     )
 
 
-# ── Ingest ──────────────────────────────────────────────────
-
-
 def ingest(
     paths: List[Path],
     collection: Optional[str] = None,
     chunk_size: int = 0,
     chunk_overlap: int = 0,
 ) -> Dict[str, Any]:
-    """
-    Читает файлы, чанкирует, эмбеддит, загружает в Qdrant.
-
-    Returns:
-        {"indexed_files": N, "inserted_chunks": N, "collection": str}
-    """
     rag = settings.rag
     col = collection or rag.collection
     size = chunk_size if chunk_size > 0 else rag.chunk_size
@@ -87,7 +69,6 @@ def ingest(
     client = _get_client()
     _ensure_collection(client, col, len(sample))
 
-    # Удаляем старые данные по source_path
     for src in {c.source_path for c in chunks}:
         client.delete(
             collection_name=col,
@@ -102,7 +83,6 @@ def ingest(
             wait=True,
         )
 
-    # Эмбеддим и грузим батчами
     vectors = embed_texts(embedder, [c.text for c in chunks], model)
     _upsert_batch(client, col, chunks, vectors)
 
@@ -141,9 +121,6 @@ def _upsert_batch(
         client.upsert(collection_name=collection, points=points, wait=True)
 
 
-# ── Retrieve ────────────────────────────────────────────────
-
-
 def _val(explicit: Optional[float], default: float) -> float:
     return explicit if explicit is not None else default
 
@@ -161,7 +138,6 @@ def retrieve(  # pylint: disable=too-many-arguments,too-many-positional-argument
     dense_weight: Optional[float] = None,
     source_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Гибридный поиск: dense (Qdrant) + BM25 rerank."""
     rag = settings.rag
     params = {
         "col": collection or rag.collection,
@@ -178,7 +154,6 @@ def _do_retrieve(
     source_name: Optional[str],
     params: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    """Внутренняя логика retrieve."""
     rag = settings.rag
     embedder = _get_embedder()
     query_vec = embed_texts(
@@ -246,9 +221,6 @@ def _search_qdrant(
     return results
 
 
-# ── Reranking ───────────────────────────────────────────────
-
-
 def _tokenize(text: str) -> List[str]:
     return [t for t in re.findall(r"[a-zа-яё0-9]+", text.lower()) if len(t) > 1]
 
@@ -297,7 +269,6 @@ def _api_rerank(
     query: str,
     candidates: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Опциональный API rerank."""
     rag = settings.rag
     url = rag.rerank_url or rag.embedder_url
     key = resolve_api_key(rag.rerank_api_key, ["HACKAI_API_KEY", "OPENAI_API_KEY"])
@@ -340,11 +311,7 @@ def _api_rerank(
     return candidates
 
 
-# ── Ask (LLM) ──────────────────────────────────────────────
-
-
 def build_context(results: List[Dict[str, Any]]) -> str:
-    """Собирает контекст для LLM."""
     return "\n\n".join(
         f"[{r['source_name']} chunk={r['chunk_index']}]\n{r['text']}"
         for r in results
@@ -352,34 +319,18 @@ def build_context(results: List[Dict[str, Any]]) -> str:
 
 
 def ask(query: str, results: List[Dict[str, Any]], model: Optional[str] = None) -> str:
-    """Генерирует ответ через LLM на основе RAG-контекста."""
-    llm = settings.llm
-    api_key = resolve_api_key(llm.api_key, ["HACKAI_API_KEY", "OPENAI_API_KEY"])
-    if not api_key:
-        raise RuntimeError("LLM API key required")
-
-    from openai import OpenAI  # pylint: disable=import-outside-toplevel
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url=normalize_base_url(llm.base_url),
-        timeout=180.0,
-        max_retries=2,
-    )
+    from backend.utils.llm import generate_text  # pylint: disable=import-outside-toplevel
 
     context = build_context(results)
-    response = client.responses.create(
-        model=model or llm.model,
-        input=[
-            {"role": "system", "content": (
-                "Ты RAG-ассистент. Отвечай строго на основе контекста. "
-                "Если данных не хватает, скажи об этом."
-            )},
-            {"role": "user", "content": (
-                f"Вопрос:\n{query}\n\nКонтекст:\n{context}\n\n"
-                "Дай краткий и точный ответ на русском языке."
-            )},
-        ],
-        temperature=0,
+    return generate_text(
+        prompt=(
+            f"Вопрос:\n{query}\n\nКонтекст:\n{context}\n\n"
+            "Дай краткий и точный ответ на русском языке."
+        ),
+        system=(
+            "Ты RAG-ассистент. Отвечай строго на основе контекста. "
+            "Если данных не хватает, скажи об этом."
+        ),
+        model=model,
+        temperature=0.0,
     )
-    return response.output_text.strip()

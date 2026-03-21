@@ -1,5 +1,3 @@
-"""Чтение документов PDF/DOCX/TXT с нормализацией текста."""
-
 from __future__ import annotations
 
 import re
@@ -9,11 +7,7 @@ from typing import Callable, Dict, List, Set
 SUPPORTED_EXTENSIONS: Set[str] = {".pdf", ".docx", ".txt"}
 
 
-# ── Нормализация ────────────────────────────────────────────
-
-
 def normalize_whitespace(text: str) -> str:
-    """Схлопывает лишние пробелы и переносы."""
     text = text.replace("\u00a0", " ")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -21,7 +15,6 @@ def normalize_whitespace(text: str) -> str:
 
 
 def fix_pdf_artifacts(text: str) -> str:
-    """Склеивает переносы и убирает пробелы перед пунктуацией."""
     text = re.sub(
         r"([A-Za-zА-Яа-яЁё])\-\n([A-Za-zА-Яа-яЁё])", r"\1\2", text
     )
@@ -58,7 +51,6 @@ _MAPPED_CHARS = set(_CYRILLIC_MAP.keys())
 
 
 def decode_substitution_cyrillic(text: str) -> str:
-    """Декодирует подстановочную кириллицу из битых PDF."""
     def _decode(match: "re.Match[str]") -> str:
         token = match.group(0)
         if "http" in token.lower() or "/" in token:
@@ -73,22 +65,16 @@ def decode_substitution_cyrillic(text: str) -> str:
 
 
 def normalize_text(text: str) -> str:
-    """Полный пайплайн нормализации текста."""
     text = decode_substitution_cyrillic(text)
     text = fix_pdf_artifacts(text)
     return normalize_whitespace(text)
 
 
-# ── Читалки ─────────────────────────────────────────────────
-
-
 def read_txt(path: Path) -> str:
-    """Читает TXT."""
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
 def read_pdf(path: Path) -> str:
-    """Читает PDF: PyMuPDF → fallback pypdf."""
     try:
         return _read_pdf_pymupdf(path)
     except Exception:  # pylint: disable=broad-except
@@ -122,14 +108,11 @@ def _read_pdf_pypdf(path: Path) -> str:
 
 
 def read_docx(path: Path) -> str:
-    """Читает DOCX."""
     from docx import Document  # pylint: disable=import-outside-toplevel
 
     doc = Document(str(path))
     return "\n".join(p.text for p in doc.paragraphs)
 
-
-# ── Единая точка входа ──────────────────────────────────────
 
 _READERS: Dict[str, Callable[[Path], str]] = {
     ".txt": read_txt,
@@ -139,7 +122,6 @@ _READERS: Dict[str, Callable[[Path], str]] = {
 
 
 def read_document(path: Path) -> str:
-    """Читает документ и возвращает нормализованный текст."""
     ext = path.suffix.lower()
     reader = _READERS.get(ext)
     if reader is None:
@@ -148,7 +130,6 @@ def read_document(path: Path) -> str:
 
 
 def collect_files(paths: List[str]) -> List[Path]:
-    """Собирает файлы из путей/директорий рекурсивно."""
     files: List[Path] = []
     for item in paths:
         path = Path(item).expanduser().resolve()

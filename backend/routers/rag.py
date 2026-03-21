@@ -1,5 +1,3 @@
-"""Роутер RAG: ingest, retrieve, ask."""
-
 from __future__ import annotations
 
 import tempfile
@@ -15,12 +13,7 @@ from backend.utils.document_reader import SUPPORTED_EXTENSIONS
 router = APIRouter(prefix="/api/rag", tags=["RAG"])
 
 
-# ── Schemas ─────────────────────────────────────────────────
-
-
 class RetrieveRequest(BaseModel):
-    """Запрос на поиск."""
-
     query: str = Field(..., min_length=1)
     collection: Optional[str] = None
     top_k: Optional[int] = Field(default=None, ge=1, le=50)
@@ -31,22 +24,16 @@ class RetrieveRequest(BaseModel):
 
 
 class AskRequest(RetrieveRequest):
-    """Запрос на поиск + ответ LLM."""
-
     model: Optional[str] = None
 
 
 class RetrieveResponse(BaseModel):
-    """Результаты поиска."""
-
     query: str
     returned: int
     results: List[Dict[str, Any]]
 
 
 class AskResponse(BaseModel):
-    """Ответ LLM + источники."""
-
     query: str
     answer: str
     model: str
@@ -55,14 +42,9 @@ class AskResponse(BaseModel):
 
 
 class IngestResponse(BaseModel):
-    """Результат индексации."""
-
     indexed_files: int
     inserted_chunks: int
     collection: str
-
-
-# ── Endpoints ───────────────────────────────────────────────
 
 
 @router.post("/ingest", response_model=IngestResponse, status_code=201)
@@ -72,7 +54,6 @@ async def ingest_files(
     chunk_size: int = Form(0),
     chunk_overlap: int = Form(0),
 ) -> IngestResponse:
-    """Загрузка и индексация документов."""
     temp_paths: List[Path] = []
     try:
         for upload in files:
@@ -103,7 +84,6 @@ async def ingest_files(
 
 @router.post("/retrieve", response_model=RetrieveResponse)
 async def retrieve(payload: RetrieveRequest) -> RetrieveResponse:
-    """Поиск релевантных чанков."""
     results = rag_service.retrieve(
         query=payload.query,
         collection=payload.collection,
@@ -120,7 +100,6 @@ async def retrieve(payload: RetrieveRequest) -> RetrieveResponse:
 
 @router.post("/ask", response_model=AskResponse)
 async def ask(payload: AskRequest) -> AskResponse:
-    """Поиск + генерация ответа через LLM."""
     results = rag_service.retrieve(
         query=payload.query,
         collection=payload.collection,

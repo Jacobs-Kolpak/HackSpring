@@ -1,5 +1,3 @@
-"""База данных: SQLAlchemy engine, сессии, модели."""
-
 import enum
 from typing import Generator
 
@@ -19,8 +17,6 @@ from backend.core.config import settings
 
 
 class UserRole(str, enum.Enum):
-    """Доступные роли пользователей."""
-
     RESEARCHER = "researcher"
     GOVERNMENT = "government"
     STUDENT = "student"
@@ -38,8 +34,6 @@ Base = declarative_base()
 
 
 class User(Base):  # type: ignore[valid-type, misc]
-    """Модель пользователя."""
-
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -61,7 +55,6 @@ class User(Base):  # type: ignore[valid-type, misc]
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Yield a database session."""
     db = session_local()
     try:
         yield db

@@ -6,8 +6,6 @@ from pydantic import BaseModel, EmailStr
 
 
 class UserRoleEnum(str, Enum):
-    """User role choices for API validation."""
-
     RESEARCHER = "researcher"
     GOVERNMENT = "government"
     STUDENT = "student"
@@ -47,7 +45,7 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
-    token_type: Optional[str] = None  # "access" or "refresh"
+    token_type: Optional[str] = None
 
 
 class UserStatus(BaseModel):

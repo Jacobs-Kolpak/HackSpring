@@ -1,5 +1,3 @@
-"""Роутер mind map: из текста, файла, RAG-запроса."""
-
 from __future__ import annotations
 
 import tempfile
@@ -16,12 +14,7 @@ from backend.utils.document_reader import SUPPORTED_EXTENSIONS, read_document
 router = APIRouter(prefix="/api/mindmap", tags=["Mindmap"])
 
 
-# ── Schemas ─────────────────────────────────────────────────
-
-
 class TextRequest(BaseModel):
-    """Mind map из текста."""
-
     text: str = Field(..., min_length=1)
     top_concepts: int = Field(default=14, ge=1, le=100)
     min_freq: int = Field(default=2, ge=1)
@@ -29,8 +22,6 @@ class TextRequest(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    """Mind map из RAG-результатов."""
-
     query: str = Field(..., min_length=1)
     collection: Optional[str] = None
     top_k: int = Field(default=8, ge=1, le=50)
@@ -43,14 +34,9 @@ class QueryRequest(BaseModel):
 
 
 class MindmapResponse(BaseModel):
-    """Данные графа."""
-
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
     meta: Dict[str, Any]
-
-
-# ── Helpers ─────────────────────────────────────────────────
 
 
 def _respond(
@@ -65,12 +51,8 @@ def _respond(
     return MindmapResponse(nodes=graph["nodes"], edges=graph["edges"], meta=meta)
 
 
-# ── Endpoints ───────────────────────────────────────────────
-
-
 @router.post("/text", response_model=MindmapResponse)
 async def from_text(payload: TextRequest) -> MindmapResponse:
-    """Mind map из текста."""
     graph = build_graph_data(
         payload.text,
         top_n=payload.top_concepts,
@@ -87,7 +69,6 @@ async def from_file(
     min_freq: int = Form(2),
     min_edge: int = Form(1),
 ) -> MindmapResponse:
-    """Mind map из загруженного файла."""
     ext = Path(file.filename or "").suffix.lower()
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -109,7 +90,6 @@ async def from_file(
 
 @router.post("/query", response_model=MindmapResponse)
 async def from_query(payload: QueryRequest) -> MindmapResponse:
-    """Mind map из результатов RAG-поиска."""
     results = rag_service.retrieve(
         query=payload.query,
         collection=payload.collection,

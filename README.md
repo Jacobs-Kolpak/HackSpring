@@ -352,6 +352,141 @@ curl -X POST http://localhost:8000/api/mindmap/query \
 
 ---
 
+### Summary — `/api/summary`
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| POST | `/api/summary/text` | Суммаризация из текста |
+| POST | `/api/summary/file` | Суммаризация из файла |
+| POST | `/api/summary/query` | Суммаризация из RAG-поиска |
+
+#### Из текста
+
+```bash
+curl -X POST http://localhost:8000/api/summary/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Длинный текст для суммаризации...",
+    "topic": "Инвестиции",
+    "max_sentences": 5
+  }'
+```
+
+Параметры:
+- `text` — текст для суммаризации
+- `topic` — тема (по умолчанию "Без названия")
+- `max_sentences` — макс. предложений (1–100, по умолчанию 10)
+- `model` — модель LLM (опционально)
+
+**Ответ:**
+```json
+{
+  "summary": "Краткое содержание текста...",
+  "source": "text",
+  "model": "gpt-oss-20b",
+  "meta": {}
+}
+```
+
+#### Из файла
+
+```bash
+curl -X POST http://localhost:8000/api/summary/file \
+  -F "file=@document.pdf" \
+  -F "topic=Финансы" \
+  -F "max_sentences=10"
+```
+
+#### Из RAG-запроса
+
+```bash
+curl -X POST http://localhost:8000/api/summary/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "инвестиционные программы",
+    "collection": "docs_ci",
+    "top_k": 8,
+    "topic": "Инвестиции",
+    "max_sentences": 10
+  }'
+```
+
+---
+
+### Podcast — `/api/podcast`
+
+| Метод | URL | Описание |
+|-------|-----|----------|
+| POST | `/api/podcast/text` | Подкаст из текста |
+| POST | `/api/podcast/file` | Подкаст из файла |
+| POST | `/api/podcast/query` | Подкаст из RAG-поиска |
+| GET | `/api/podcast/audio/{filename}` | Скачать аудиофайл |
+
+#### Из текста
+
+```bash
+curl -X POST http://localhost:8000/api/podcast/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Текст для генерации подкаста...",
+    "topic": "Финансы",
+    "tone": "scientific",
+    "pace": "normal"
+  }'
+```
+
+Параметры:
+- `text` — текст для подкаста
+- `topic` — тема (по умолчанию "Без названия")
+- `tone` — тональность: `scientific`|`everyday` (или `научный`|`повседневный`)
+- `pace` — темп: `slow`|`normal`|`fast` (или `медленно`|`нормально`|`быстро`)
+- `model` — модель LLM (опционально)
+
+**Ответ:**
+```json
+{
+  "dialogue": "Ведущий 1: Сегодня мы обсудим...\nВедущий 2: Да, это интересная тема...",
+  "source": "text",
+  "model": "gpt-oss-20b",
+  "has_audio": true,
+  "audio_url": "/api/podcast/audio/podcast_a1b2c3d4e5f6.wav",
+  "meta": {}
+}
+```
+
+#### Из файла
+
+```bash
+curl -X POST http://localhost:8000/api/podcast/file \
+  -F "file=@document.pdf" \
+  -F "topic=Финансы" \
+  -F "tone=everyday" \
+  -F "pace=normal"
+```
+
+#### Из RAG-запроса
+
+```bash
+curl -X POST http://localhost:8000/api/podcast/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "инвестиционные программы",
+    "collection": "docs_ci",
+    "top_k": 8,
+    "topic": "Инвестиции",
+    "tone": "scientific",
+    "pace": "normal"
+  }'
+```
+
+#### Скачать аудио
+
+```bash
+curl -O http://localhost:8000/api/podcast/audio/podcast_a1b2c3d4e5f6.wav
+```
+
+---
+
 ## Полный сценарий тестирования
 
 ```bash
@@ -400,6 +535,16 @@ curl -X POST http://localhost:8000/api/mindmap/text \
 # 9. Mind map из файла
 curl -X POST http://localhost:8000/api/mindmap/file \
   -F "file=@your_document.pdf"
+
+# 10. Суммаризация текста
+curl -X POST http://localhost:8000/api/summary/text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "ваш текст...", "topic": "Тема", "max_sentences": 5}'
+
+# 11. Подкаст из текста
+curl -X POST http://localhost:8000/api/podcast/text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "ваш текст...", "topic": "Тема", "tone": "scientific", "pace": "normal"}'
 ```
 
 ---
@@ -450,4 +595,6 @@ docker compose down              # остановка
 - **Auth:** JWT (access + refresh tokens), bcrypt
 - **RAG:** Qdrant, fastembed, BM25 rerank, OpenAI-compatible LLM
 - **Mind Map:** TF + co-occurrence graph, vis-network
+- **Summary:** Суммаризация через LLM
+- **Podcast:** Генерация диалога + TTS (pyttsx3/espeak)
 - **Infra:** Docker Compose, PostgreSQL, Qdrant

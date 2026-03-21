@@ -1,5 +1,3 @@
-"""Sentence-aware чанкинг текста."""
-
 from __future__ import annotations
 
 import re
@@ -13,8 +11,6 @@ from backend.utils.document_reader import read_document
 
 @dataclass
 class Chunk:
-    """Единица текста после разбиения документа."""
-
     chunk_id: str
     source_path: str
     source_name: str
@@ -24,7 +20,6 @@ class Chunk:
 
 
 def split_sentences(text: str) -> List[str]:
-    """Разбивает текст на предложения."""
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
     sentences: List[str] = []
     for para in paragraphs:
@@ -54,7 +49,6 @@ def _chunk_long_sentence(
 
 
 def chunk_text(text: str, size: int, overlap: int) -> List[str]:
-    """Разбивает текст на чанки с учётом границ предложений."""
     if size <= 0:
         raise ValueError("size must be > 0")
     if overlap < 0:
@@ -91,7 +85,6 @@ def chunk_text(text: str, size: int, overlap: int) -> List[str]:
 
 
 def make_chunk_id(path: Path, index: int, text: str) -> str:
-    """Генерирует детерминированный UUID5 для чанка."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{path}:{index}:{text}"))
 
 
@@ -101,7 +94,6 @@ def build_chunks(
     overlap: int,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> List[Chunk]:
-    """Читает документы и возвращает список чанков."""
     result: List[Chunk] = []
     shared = dict(metadata or {})
 
