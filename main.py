@@ -32,6 +32,12 @@ def parse_args() -> argparse.Namespace:
 
     # Summary
     parser.add_argument("--max-sentences", type=int, default=5, help="Максимум предложений в кратком саммари")
+    parser.add_argument(
+        "--summary-template",
+        type=str,
+        default="summary",
+        help="Шаблон суммаризации: executive|detailed|summary или исполнительное резюме|детализированный|саммари",
+    )
     parser.add_argument("--output", type=Path, help="Куда сохранить итоговый summary (txt)")
 
     # Audio
@@ -84,7 +90,10 @@ def run_summary(args: argparse.Namespace, source_text: str) -> None:
     result = summarizer.summarize(
         text=source_text,
         topic=args.topic,
-        config=SummaryConfig(max_sentences=args.max_sentences),
+        config=SummaryConfig(
+            max_sentences=args.max_sentences,
+            template=_normalize_summary_template(args.summary_template),
+        ),
     )
 
     if args.output:
@@ -166,6 +175,22 @@ def _normalize_pace(value: str) -> str:
         allowed = "slow|normal|fast или медленно|нормально|быстро"
         raise SystemExit(f"Некорректный --pace: {value}. Используйте {allowed}.")
     return mapping[pace]
+
+
+def _normalize_summary_template(value: str) -> str:
+    template = value.strip().lower()
+    mapping = {
+        "executive": "executive",
+        "исполнительное резюме": "executive",
+        "детализированный": "detailed",
+        "detailed": "detailed",
+        "summary": "summary",
+        "саммари": "summary",
+    }
+    if template not in mapping:
+        allowed = "executive|detailed|summary или исполнительное резюме|детализированный|саммари"
+        raise SystemExit(f"Некорректный --summary-template: {value}. Используйте {allowed}.")
+    return mapping[template]
 
 
 def _build_remote_client(args: argparse.Namespace) -> RemoteLLMClient:
