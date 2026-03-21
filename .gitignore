@@ -5,3 +5,4 @@ data/
 audio/dialogue.txt
 README.md
 audio/podcast.wav
+.env

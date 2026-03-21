@@ -1,0 +1,15 @@
+services:
+  hackspring-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hackspring-api
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      HACKSPRING_JOBS_DIR: "${HACKSPRING_JOBS_DIR:-/tmp/hackspring_jobs}"
+    volumes:
+      - ./data/jobs:${HACKSPRING_JOBS_DIR:-/tmp/hackspring_jobs}
+    restart: unless-stopped
