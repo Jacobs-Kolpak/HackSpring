@@ -47,6 +47,14 @@ def parse_args() -> argparse.Namespace:
         default="normal",
         help="Темп речи: slow|normal|fast или медленно|нормально|быстро",
     )
+    parser.add_argument(
+        "--tts-model",
+        choices=["silero"],
+        default="silero",
+        help="Озвучка диалога через Silero TTS",
+    )
+    parser.add_argument("--silero-speaker-1", type=str, default="baya", help="Голос для Ведущего 1 (silero)")
+    parser.add_argument("--silero-speaker-2", type=str, default="xenia", help="Голос для Ведущего 2 (silero)")
     parser.add_argument("--dialog-output", type=Path, default=Path("audio/dialogue.txt"), help="Куда сохранить текст диалога")
     parser.add_argument("--audio-output", type=Path, default=Path("audio/podcast.wav"), help="Куда сохранить audio wav")
 
@@ -98,6 +106,8 @@ def run_audio(args: argparse.Namespace, source_text: str) -> None:
             config=PodcastConfig(
                 tone=tone,
                 pace=pace,
+                silero_speaker_1=args.silero_speaker_1,
+                silero_speaker_2=args.silero_speaker_2,
             ),
         )
     except RuntimeError as exc:
@@ -106,13 +116,20 @@ def run_audio(args: argparse.Namespace, source_text: str) -> None:
     args.dialog_output.parent.mkdir(parents=True, exist_ok=True)
     args.dialog_output.write_text(dialogue, encoding="utf-8")
 
-    ok = generator.save_audio(dialogue, output_path=args.audio_output, pace=pace)
+    ok = generator.save_audio(
+        dialogue,
+        output_path=args.audio_output,
+        pace=pace,
+        tts_model=args.tts_model,
+        silero_speaker_1=args.silero_speaker_1,
+        silero_speaker_2=args.silero_speaker_2,
+    )
 
     print(f"Диалог сохранен: {args.dialog_output}")
     if ok:
         print(f"Аудио сохранено: {args.audio_output}")
     else:
-        print("Аудио не создано (вероятно, не установлен pyttsx3/espeak). Текст диалога готов.")
+        print("Аудио не создано (проверьте зависимости для выбранной TTS-модели). Текст диалога готов.")
 
 
 def _normalize_tone(value: str) -> str:
