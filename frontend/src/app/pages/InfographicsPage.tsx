@@ -191,10 +191,6 @@ export default function InfographicsPage() {
     {
       query: DEFAULT_QUERY,
       selectedSourceName: "all",
-      topK: 8,
-      fetchK: 20,
-      minScore: 0.1,
-      denseWeight: 0.7,
       maxTopics: 6,
       errorMessage: null as string | null,
       generatedInfographic: null as InfographicsResponse | null,
@@ -203,14 +199,6 @@ export default function InfographicsPage() {
   const [query, setQuery] = useState(persistedState.query);
   const [selectedSourceName, setSelectedSourceName] =
     useState<string>(persistedState.selectedSourceName);
-  const [topK, setTopK] = useState(persistedState.topK);
-  const [fetchK, setFetchK] = useState(persistedState.fetchK);
-  const [minScore, setMinScore] = useState(
-    persistedState.minScore,
-  );
-  const [denseWeight, setDenseWeight] = useState(
-    persistedState.denseWeight,
-  );
   const [maxTopics, setMaxTopics] = useState(
     persistedState.maxTopics,
   );
@@ -236,24 +224,16 @@ export default function InfographicsPage() {
     writeSessionState(INFOGRAPHICS_PAGE_STORAGE_KEY, {
       query,
       selectedSourceName,
-      topK,
-      fetchK,
-      minScore,
-      denseWeight,
       maxTopics,
       errorMessage,
       generatedInfographic,
     });
   }, [
-    denseWeight,
     errorMessage,
-    fetchK,
     generatedInfographic,
     maxTopics,
-    minScore,
     query,
     selectedSourceName,
-    topK,
   ]);
 
   const barChartRef =
@@ -457,10 +437,10 @@ export default function InfographicsPage() {
     const payload: Record<string, unknown> = {
       query: query.trim(),
       collection: "docs_ci",
-      top_k: topK,
-      fetch_k: fetchK,
-      min_score: minScore,
-      dense_weight: denseWeight,
+      top_k: 8,
+      fetch_k: 20,
+      min_score: 0.1,
+      dense_weight: 0.7,
       max_topics: maxTopics,
     };
 
@@ -527,10 +507,6 @@ export default function InfographicsPage() {
     writeSessionState(INFOGRAPHICS_PAGE_STORAGE_KEY, {
       query,
       selectedSourceName,
-      topK,
-      fetchK,
-      minScore,
-      denseWeight,
       maxTopics,
       errorMessage: null,
       generatedInfographic: null,
@@ -641,80 +617,6 @@ export default function InfographicsPage() {
                     }
                     className="w-full px-4 py-3 bg-[#0f0f0f] border border-[#262626] rounded text-white focus:outline-none focus:border-[#f97316]"
                   />
-                </div>
-              </div>
-
-              <div className="rounded border border-[#262626] bg-[#101010] p-5">
-                <div className="text-sm font-medium text-white mb-4">
-                  Тонкая настройка поиска
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-500 mb-2">
-                      top_k
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={50}
-                      value={topK}
-                      onChange={(e) =>
-                        setTopK(Number(e.target.value) || 1)
-                      }
-                      className="w-full px-4 py-3 bg-[#0b0b0b] border border-[#262626] rounded text-white focus:outline-none focus:border-[#f97316]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-500 mb-2">
-                      fetch_k
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={fetchK}
-                      onChange={(e) =>
-                        setFetchK(Number(e.target.value) || 1)
-                      }
-                      className="w-full px-4 py-3 bg-[#0b0b0b] border border-[#262626] rounded text-white focus:outline-none focus:border-[#f97316]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-500 mb-2">
-                      min_score
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      max={1}
-                      value={minScore}
-                      onChange={(e) =>
-                        setMinScore(
-                          Number(e.target.value) || 0,
-                        )
-                      }
-                      className="w-full px-4 py-3 bg-[#0b0b0b] border border-[#262626] rounded text-white focus:outline-none focus:border-[#f97316]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider text-gray-500 mb-2">
-                      dense_weight
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      max={1}
-                      value={denseWeight}
-                      onChange={(e) =>
-                        setDenseWeight(
-                          Number(e.target.value) || 0,
-                        )
-                      }
-                      className="w-full px-4 py-3 bg-[#0b0b0b] border border-[#262626] rounded text-white focus:outline-none focus:border-[#f97316]"
-                    />
-                  </div>
                 </div>
               </div>
 

@@ -493,7 +493,7 @@ export default function VideoPage() {
             >
               <Video className="w-6 h-6" />
               {isGenerating
-                ? "Генерирую MP4 через внешний video API..."
+                ? "Генерирую MP4..."
                 : "Сгенерировать видео"}
             </button>
 
