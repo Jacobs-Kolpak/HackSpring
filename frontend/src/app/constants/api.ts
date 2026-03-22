@@ -34,6 +34,7 @@ export const API_ROUTES = {
   },
   PRESENTATION: {
     GENERATE: `${API_BASE_URL}/presentation/generate`,
+    GENERATE_WITH_TEMPLATE: `${API_BASE_URL}/presentation/generate-with-template`,
     FROM_RESULTS: `${API_BASE_URL}/presentation/from-results`,
     DOWNLOAD: `${API_BASE_URL}/presentation/download`,
   },

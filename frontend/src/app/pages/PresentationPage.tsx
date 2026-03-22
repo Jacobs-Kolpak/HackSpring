@@ -35,6 +35,7 @@ export default function PresentationPage() {
       query: "",
       topK: 8,
       maxSlides: 8,
+      templateFileName: null as string | null,
       selectedDocumentIds: [] as string[],
       generationError: null as string | null,
       generatedPresentation: null as PresentationResponse | null,
@@ -44,6 +45,10 @@ export default function PresentationPage() {
   const [topK, setTopK] = useState(persistedState.topK);
   const [maxSlides, setMaxSlides] = useState(
     persistedState.maxSlides,
+  );
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [templateFileName, setTemplateFileName] = useState<string | null>(
+    persistedState.templateFileName,
   );
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>(
     persistedState.selectedDocumentIds,
@@ -82,6 +87,7 @@ export default function PresentationPage() {
       query,
       topK,
       maxSlides,
+      templateFileName,
       selectedDocumentIds,
       generationError,
       generatedPresentation,
@@ -92,6 +98,7 @@ export default function PresentationPage() {
     maxSlides,
     query,
     selectedDocumentIds,
+    templateFileName,
     topK,
   ]);
 
@@ -130,11 +137,33 @@ export default function PresentationPage() {
         max_slides: maxSlides,
       };
 
-      console.log("Presentation generate request:", payload);
-      const response = await axios.post(
-        API_ROUTES.PRESENTATION.GENERATE,
-        payload,
-      );
+      console.log("Presentation generate request:", {
+        ...payload,
+        template: templateFile?.name || null,
+      });
+
+      const response = templateFile
+        ? await axios.post(
+            API_ROUTES.PRESENTATION.GENERATE_WITH_TEMPLATE,
+            (() => {
+              const formData = new FormData();
+              formData.append("query", scopedQuery);
+              formData.append("collection", "docs_ci");
+              formData.append("top_k", String(topK));
+              formData.append("max_slides", String(maxSlides));
+              formData.append("template", templateFile);
+              return formData;
+            })(),
+            {
+              headers: {
+                "Content-Type": "multipart/form-data",
+              },
+            },
+          )
+        : await axios.post(
+            API_ROUTES.PRESENTATION.GENERATE,
+            payload,
+          );
 
       console.log("Presentation generate response:", response.data);
       setGeneratedPresentation(response.data);
@@ -217,6 +246,7 @@ export default function PresentationPage() {
       query,
       topK,
       maxSlides,
+      templateFileName,
       selectedDocumentIds,
       generationError: null,
       generatedPresentation: null,
@@ -347,6 +377,30 @@ export default function PresentationPage() {
                     className="w-full px-4 py-3 bg-[#0f0f0f] border border-[#262626] rounded text-white focus:outline-none focus:border-[#22c55e]"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  Шаблон презентации (.pptx, опционально)
+                </label>
+                <input
+                  type="file"
+                  accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    setTemplateFile(file);
+                    setTemplateFileName(file?.name ?? null);
+                  }}
+                  className="w-full px-4 py-3 bg-[#0f0f0f] border border-[#262626] rounded text-sm text-gray-300 file:mr-4 file:rounded file:border-0 file:bg-[#1f2937] file:px-3 file:py-2 file:text-sm file:text-white"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Если выбрать шаблон, backend возьмёт из него стили и сгенерирует новую презентацию в этом стиле.
+                </p>
+                {templateFileName && (
+                  <p className="mt-2 text-xs text-[#22c55e]">
+                    Выбран шаблон: {templateFileName}
+                  </p>
+                )}
               </div>
             </div>
 

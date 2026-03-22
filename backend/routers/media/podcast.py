@@ -1,26 +1,21 @@
 from __future__ import annotations
 
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from backend.services.media import podcast as podcast_service
-from backend.services.media.podcast import (
-    AVAILABLE_SPEAKERS,
-    PodcastConfig,
-    normalize_pace,
-    normalize_tone,
-)
-from backend.utils.document_reader import SUPPORTED_EXTENSIONS, read_document
+from backend.core.config import settings
 
 router = APIRouter(prefix="/api/jacobs/podcast", tags=["Podcast"])
 
 _AUDIO_DIR = Path("data/audio")
+
+AVAILABLE_SPEAKERS = ["aidar", "baya", "eugene", "kseniya", "xenia"]
 
 
 class DialogueResponse(BaseModel):
@@ -37,39 +32,8 @@ class SpeakersResponse(BaseModel):
     speakers: List[str]
 
 
-def _make_config(
-    tone: str,
-    pace: str,
-    speaker_1: str = "baya",
-    speaker_2: str = "xenia",
-) -> PodcastConfig:
-    return PodcastConfig(
-        tone=normalize_tone(tone),
-        pace=normalize_pace(pace),
-        silero_speaker_1=speaker_1,
-        silero_speaker_2=speaker_2,
-    )
-
-
-def _try_audio(
-    dialogue: str,
-    pace: str,
-    speaker_1: str = "baya",
-    speaker_2: str = "xenia",
-) -> tuple[bool, Optional[str], Optional[str]]:
-    _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    filename = f"podcast_{uuid.uuid4().hex[:12]}.wav"
-    audio_path = _AUDIO_DIR / filename
-    ok, error = podcast_service.save_audio(
-        dialogue,
-        audio_path,
-        pace=normalize_pace(pace),
-        silero_speaker_1=speaker_1,
-        silero_speaker_2=speaker_2,
-    )
-    if ok:
-        return True, f"/api/jacobs/podcast/audio/{filename}", None
-    return False, None, error
+def _normalize_base_url(url: str) -> str:
+    return url.rstrip("/")
 
 
 @router.get("/speakers", response_model=SpeakersResponse)
@@ -87,41 +51,79 @@ async def from_file(
     speaker_2: str = Form("xenia"),
     model: Optional[str] = Form(None),
 ) -> DialogueResponse:
-    ext = Path(file.filename or "").suffix.lower()
-    if ext not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Неподдерживаемый формат")
+    if not settings.video.api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="VIDEO_API_KEY is not configured (shared with podcast service)",
+        )
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Файл пустой")
+
+    target_url = f"{_normalize_base_url(settings.video.base_url)}/v1/podcast-from-file"
+    headers = {"X-API-Key": settings.video.api_key}
+    files_payload = {
+        "file": (
+            file.filename or "document.txt",
+            file_bytes,
+            file.content_type or "application/octet-stream",
+        )
+    }
+    data = {
+        "topic": topic,
+        "tone": tone,
+        "pace": pace,
+        "silero_speaker_1": speaker_1,
+        "silero_speaker_2": speaker_2,
+    }
 
     try:
-        cfg = _make_config(tone, pace, speaker_1, speaker_2)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        async with httpx.AsyncClient(timeout=settings.video.timeout_seconds) as client:
+            upstream = await client.post(
+                target_url,
+                headers=headers,
+                data=data,
+                files=files_payload,
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Podcast service unavailable: {exc}",
+        ) from exc
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        tmp.write(await file.read())
-        temp_path = Path(tmp.name)
-    try:
-        text = read_document(temp_path)
-    finally:
-        temp_path.unlink(missing_ok=True)
+    content_type = upstream.headers.get("content-type", "")
 
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="В файле нет текста")
+    if upstream.status_code >= 400:
+        if "application/json" in content_type:
+            try:
+                payload = upstream.json()
+                detail = str(payload.get("detail") or payload)
+            except ValueError:
+                detail = upstream.text or "Podcast service error"
+        else:
+            detail = upstream.text or "Podcast service error"
+        return DialogueResponse(
+            dialogue="",
+            source="file",
+            model="external",
+            has_audio=False,
+            audio_error=f"Ошибка внешнего сервиса: {detail}",
+            meta={"filename": file.filename, "speakers": [speaker_1, speaker_2]},
+        )
 
-    from backend.core.config import settings
-
-    used_model = model or settings.llm.model
-    dialogue = podcast_service.generate_dialogue(
-        text, topic=topic, config=cfg, model=used_model
-    )
-    has_audio, audio_url, audio_error = _try_audio(dialogue, pace, speaker_1, speaker_2)
+    # Save WAV response to local file
+    _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"podcast_{uuid.uuid4().hex[:12]}.wav"
+    audio_path = _AUDIO_DIR / filename
+    audio_path.write_bytes(upstream.content)
 
     return DialogueResponse(
-        dialogue=dialogue,
+        dialogue="",
         source="file",
-        model=used_model,
-        has_audio=has_audio,
-        audio_url=audio_url,
-        audio_error=audio_error,
+        model="external",
+        has_audio=True,
+        audio_url=f"/api/jacobs/podcast/audio/{filename}",
         meta={"filename": file.filename, "speakers": [speaker_1, speaker_2]},
     )
 
