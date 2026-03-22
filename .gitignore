@@ -7,6 +7,9 @@ __pycache__/
 .env
 *.env.local
 
+# SSL-сертификаты и ключи
+docker/ssl/
+
 # Данные проекта (генерируются локально)
 data/
 docs
