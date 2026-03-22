@@ -88,13 +88,31 @@ cp .env.example .env
 Опционально:
 - `VIDEO_API_KEY` — для `/api/jacobs/video/from-file`
 
-### 2. Запуск
+### 2. SSL-сертификаты (опционально)
+
+SSL **не обязателен** для запуска. Без сертификатов проект работает по HTTP на порту 3000.
+
+Если нужен HTTPS, положите файлы в `docker/ssl/`:
+
+```
+docker/ssl/
+  fullchain.crt   # сертификат + цепочка CA
+  private.key     # приватный ключ
+```
+
+> **Важно:** Папка `docker/ssl/` добавлена в `.gitignore`. Сертификаты нужно копировать на сервер вручную через `scp`, **не через git**.
+
+При запуске entrypoint автоматически определит наличие сертификатов:
+- **Есть сертификаты** — запуск с HTTP (порт 3000) + HTTPS (порт 443) + редирект (порт 80 -> 443)
+- **Нет сертификатов** — запуск только HTTP (порт 3000)
+
+### 3. Запуск
 
 ```bash
 docker compose up --build -d
 ```
 
-### 3. Проверка
+### 4. Проверка
 
 ```bash
 curl http://localhost:8000/health
@@ -102,14 +120,17 @@ curl http://localhost:8000/health
 
 Ожидаемо: `{"status":"healthy", ...}`
 
-### 4. URL сервисов
+### 5. URL сервисов
 
-- Frontend: `http://localhost:3000`
-- Backend API: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+| Режим | URL |
+|---|---|
+| Frontend (HTTP) | `http://localhost:3000` |
+| Frontend (HTTPS, если есть SSL) | `https://your-domain.ru` |
+| Backend API | `http://localhost:8000` |
+| Swagger | `http://localhost:8000/docs` |
+| ReDoc | `http://localhost:8000/redoc` |
 
-### 5. Полезные команды
+### 6. Полезные команды
 
 ```bash
 docker compose logs -f app
