@@ -131,6 +131,7 @@ export default function Home() {
     setCurrentMindmapGraphData,
     setCurrentPodcastAudioUrl,
     setCurrentPodcastAudioLoading,
+    setCurrentPodcastError,
     setCurrentFlashcards,
     setCurrentTests,
     setUploadedSourceFiles,
@@ -285,6 +286,13 @@ export default function Home() {
       if (podcastResponse && podcastResponse.audio_url) {
         console.log("Podcast generation successful:", podcastResponse);
         setCurrentPodcastAudioUrl(podcastResponse.audio_url);
+        setCurrentPodcastError(null);
+      } else if (podcastResponse && !podcastResponse.has_audio) {
+        const errMsg = podcastResponse.audio_error || "Не удалось сгенерировать аудио";
+        console.error("Podcast audio generation failed:", errMsg);
+        setCurrentPodcastError(errMsg);
+      } else if (!podcastResponseRaw) {
+        setCurrentPodcastError("Запрос генерации подкаста не выполнен");
       }
 
       const flashcardsResponse = flashcardsResponseRaw?.data || null;
@@ -454,6 +462,11 @@ export default function Home() {
 
       if (podcastRes?.data?.audio_url) {
         setCurrentPodcastAudioUrl(podcastRes.data.audio_url);
+        setCurrentPodcastError(null);
+      } else if (podcastRes?.data && !podcastRes.data.has_audio) {
+        setCurrentPodcastError(podcastRes.data.audio_error || "Не удалось сгенерировать аудио");
+      } else if (!podcastRes) {
+        setCurrentPodcastError("Запрос генерации подкаста не выполнен");
       }
 
       if (flashcardsRes?.data) {

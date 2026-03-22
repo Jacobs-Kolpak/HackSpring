@@ -57,6 +57,8 @@ interface DocumentContextType {
   setCurrentPodcastAudioUrl: (url: string | null) => void;
   currentPodcastAudioLoading: boolean;
   setCurrentPodcastAudioLoading: (loading: boolean) => void;
+  currentPodcastError: string | null;
+  setCurrentPodcastError: (error: string | null) => void;
   currentFlashcards: FlashcardStudyItem[];
   setCurrentFlashcards: (flashcards: FlashcardStudyItem[]) => void;
   currentTests: TestQuestion[];
@@ -111,6 +113,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const [currentMindmapGraphData, setCurrentMindmapGraphData] = useState<MindmapGraphData | null>(persisted?.mindmap ?? null);
   const [currentPodcastAudioUrl, setCurrentPodcastAudioUrl] = useState<string | null>(persisted?.podcastUrl ?? null);
   const [currentPodcastAudioLoading, setCurrentPodcastAudioLoading] = useState(false);
+  const [currentPodcastError, setCurrentPodcastError] = useState<string | null>(null);
   const [currentFlashcards, setCurrentFlashcards] = useState<FlashcardStudyItem[]>(persisted?.flashcards ?? []);
   const [currentTests, setCurrentTests] = useState<TestQuestion[]>(persisted?.tests ?? []);
   const [uploadedSourceFiles, setUploadedSourceFiles] = useState<File[]>([]);
@@ -139,6 +142,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     setCurrentMindmapGraphData(null);
     setCurrentPodcastAudioUrl(null);
     setCurrentPodcastAudioLoading(false);
+    setCurrentPodcastError(null);
     setCurrentFlashcards([]);
     setCurrentTests([]);
     setUploadedSourceFiles([]);
@@ -157,6 +161,8 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       setCurrentPodcastAudioUrl,
       currentPodcastAudioLoading,
       setCurrentPodcastAudioLoading,
+      currentPodcastError,
+      setCurrentPodcastError,
       currentFlashcards,
       setCurrentFlashcards,
       currentTests,

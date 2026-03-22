@@ -197,22 +197,48 @@ def _split_for_tts(
 
 def _load_silero_model():  # type: ignore[no-untyped-def]
     global _silero_model, _silero_sample_rate, _silero_load_error  # noqa: PLW0603
+    if _silero_load_error:
+        return None, None
     if _silero_model is not None:
         return _silero_model, _silero_sample_rate
     try:
+        import os  # pylint: disable=import-outside-toplevel
         import ssl  # pylint: disable=import-outside-toplevel
+        import urllib.request  # pylint: disable=import-outside-toplevel
 
         import torch  # pylint: disable=import-outside-toplevel
         from silero import silero_tts  # pylint: disable=import-outside-toplevel
 
         # Отключаем проверку SSL — внутри контейнера бывают проблемы с сертификатами
         ssl._create_default_https_context = ssl._create_unverified_context
+        # Также патчим urllib напрямую, чтобы torch.hub тоже использовал незащищённый контекст
+        _no_verify_ctx = ssl.create_default_context()
+        _no_verify_ctx.check_hostname = False
+        _no_verify_ctx.verify_mode = ssl.CERT_NONE
+        _orig_urlopen = urllib.request.urlopen
+
+        def _patched_urlopen(url, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if "context" not in kwargs:
+                kwargs["context"] = _no_verify_ctx
+            return _orig_urlopen(url, *args, **kwargs)
+
+        urllib.request.urlopen = _patched_urlopen  # type: ignore[assignment]
+        os.environ["PYTHONHTTPSVERIFY"] = "0"
 
         logger.info("Loading Silero TTS via silero pip package...")
-        model, symbols, sample_rate, example_text, apply_tts = silero_tts(
+        result = silero_tts(
             language="ru",
             speaker="v4_ru",
         )
+        # Восстанавливаем оригинальный urlopen
+        urllib.request.urlopen = _orig_urlopen  # type: ignore[assignment]
+        # Новые версии silero возвращают (model, utils),
+        # старые — (model, symbols, sample_rate, example_text, apply_tts)
+        if isinstance(result, tuple) and len(result) == 2:
+            model = result[0]
+            sample_rate = _silero_sample_rate  # используем дефолт 48000
+        else:
+            model, _symbols, sample_rate, _example_text, _apply_tts = result
         logger.info("Silero loaded via pip package OK")
 
         _silero_model = model
@@ -238,17 +264,17 @@ def save_audio(
     pace: str = "normal",
     silero_speaker_1: str = "baya",
     silero_speaker_2: str = "xenia",
-) -> bool:
+) -> tuple[bool, str | None]:
     _ = pace
     try:
         import numpy as np  # pylint: disable=import-outside-toplevel
     except ImportError:
-        return False
+        return False, "numpy не установлен"
 
     model, sample_rate = _load_silero_model()
     if model is None or sample_rate is None:
         logger.error("Silero model not loaded, load_error=%s", _silero_load_error)
-        return False
+        return False, f"Silero TTS не загружен: {_silero_load_error}"
 
     logger.info("Silero model loaded OK, sample_rate=%s", sample_rate)
 
@@ -258,6 +284,9 @@ def save_audio(
         chunks = [(1, clean)] if clean else []
 
     logger.info("TTS chunks count: %d", len(chunks))
+
+    if not chunks:
+        return False, "Нет текста для озвучки"
 
     wav_parts: list = []
     pause = np.zeros(int(0.14 * sample_rate), dtype=np.float32)
@@ -306,7 +335,7 @@ def save_audio(
         success_chunks += 1
 
     if not wav_parts or success_chunks == 0:
-        return False
+        return False, "TTS не смог озвучить ни одного фрагмента"
 
     full_audio = np.concatenate(wav_parts)
     full_audio = np.clip(full_audio, -1.0, 1.0)
@@ -319,4 +348,5 @@ def save_audio(
         wf.setframerate(sample_rate)
         wf.writeframes(wav_int16.tobytes())
 
-    return output_path.exists() and output_path.stat().st_size > 44
+    ok = output_path.exists() and output_path.stat().st_size > 44
+    return ok, (None if ok else "WAV файл не создан или пустой")

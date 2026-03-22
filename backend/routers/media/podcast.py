@@ -29,6 +29,7 @@ class DialogueResponse(BaseModel):
     model: str
     has_audio: bool
     audio_url: Optional[str] = None
+    audio_error: Optional[str] = None
     meta: Dict[str, Any] = {}
 
 
@@ -55,11 +56,11 @@ def _try_audio(
     pace: str,
     speaker_1: str = "baya",
     speaker_2: str = "xenia",
-) -> tuple[bool, Optional[str]]:
+) -> tuple[bool, Optional[str], Optional[str]]:
     _AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     filename = f"podcast_{uuid.uuid4().hex[:12]}.wav"
     audio_path = _AUDIO_DIR / filename
-    ok = podcast_service.save_audio(
+    ok, error = podcast_service.save_audio(
         dialogue,
         audio_path,
         pace=normalize_pace(pace),
@@ -67,8 +68,8 @@ def _try_audio(
         silero_speaker_2=speaker_2,
     )
     if ok:
-        return True, f"/api/jacobs/podcast/audio/{filename}"
-    return False, None
+        return True, f"/api/jacobs/podcast/audio/{filename}", None
+    return False, None, error
 
 
 @router.get("/speakers", response_model=SpeakersResponse)
@@ -112,7 +113,7 @@ async def from_file(
     dialogue = podcast_service.generate_dialogue(
         text, topic=topic, config=cfg, model=used_model
     )
-    has_audio, audio_url = _try_audio(dialogue, pace, speaker_1, speaker_2)
+    has_audio, audio_url, audio_error = _try_audio(dialogue, pace, speaker_1, speaker_2)
 
     return DialogueResponse(
         dialogue=dialogue,
@@ -120,6 +121,7 @@ async def from_file(
         model=used_model,
         has_audio=has_audio,
         audio_url=audio_url,
+        audio_error=audio_error,
         meta={"filename": file.filename, "speakers": [speaker_1, speaker_2]},
     )
 

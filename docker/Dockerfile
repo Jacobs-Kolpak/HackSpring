@@ -9,6 +9,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        libpq-dev gcc g++ \
        ffmpeg fonts-dejavu-core ca-certificates \
+       git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

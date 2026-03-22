@@ -12,6 +12,8 @@ export default function AudioPage() {
     currentPodcastAudioLoading,
     setCurrentPodcastAudioLoading,
     setCurrentPodcastAudioUrl,
+    currentPodcastError,
+    setCurrentPodcastError,
   } = useDocuments();
   const navigate = useNavigate();
 
@@ -24,7 +26,12 @@ export default function AudioPage() {
     if (/^https?:\/\//i.test(url)) {
       return url;
     }
-    return url;
+    try {
+      const apiOrigin = new URL(API_BASE_URL, window.location.origin).origin;
+      return new URL(url, apiOrigin).toString();
+    } catch {
+      return url;
+    }
   };
 
   useEffect(() => {
@@ -58,7 +65,7 @@ export default function AudioPage() {
 
   const isAudioBusy = currentPodcastAudioLoading || isPlayerLoading;
   const hasClearableOutput =
-    Boolean(audioUrl) || Boolean(currentPodcastAudioUrl) || audioLoadError;
+    Boolean(audioUrl) || Boolean(currentPodcastAudioUrl) || audioLoadError || Boolean(currentPodcastError);
 
   const handleClearPageOutput = () => {
     setAudioUrl(null);
@@ -67,6 +74,7 @@ export default function AudioPage() {
     setAudioLoadError(false);
     setCurrentPodcastAudioUrl(null);
     setCurrentPodcastAudioLoading(false);
+    setCurrentPodcastError(null);
   };
 
   if (documents.length === 0) {
@@ -181,7 +189,7 @@ export default function AudioPage() {
             </>
           ) : (
             <div className="rounded-xl border border-dashed border-[#262626] bg-[#0f0f0f] p-6 min-h-[220px] flex flex-col items-center justify-center text-center">
-              {audioLoadError ? (
+              {audioLoadError || currentPodcastError ? (
                 <AlertCircle className="w-10 h-10 text-[#f97316] mb-4" />
               ) : isAudioBusy ? (
                 <Loader2 className="w-10 h-10 text-[#10b981] mb-4 animate-spin" />
@@ -192,19 +200,23 @@ export default function AudioPage() {
               <p className="text-white font-medium mb-2">
                 {audioLoadError
                   ? 'Не удалось открыть аудиофайл'
-                  : isAudioBusy
-                    ? 'Аудио загружается'
-                    : 'Аудио еще не готово'}
+                  : currentPodcastError
+                    ? 'Ошибка генерации аудио'
+                    : isAudioBusy
+                      ? 'Аудио загружается'
+                      : 'Аудио еще не готово'}
               </p>
 
               <p className="text-sm text-gray-400 max-w-sm">
                 {audioLoadError
                   ? 'Сервер оборвал соединение при выдаче большого WAV-файла. Попробуйте открыть страницу еще раз или скачать файл напрямую позже.'
-                  : currentPodcastAudioLoading
-                    ? 'Система формирует аудиопересказ по загруженному документу.'
-                    : isPlayerLoading
-                      ? 'Браузер получает поток аудио и подготавливает его к воспроизведению. Это может занять время для больших файлов.'
-                      : 'Вернитесь на главную страницу и загрузите документ. После обработки аудиопересказ появится здесь автоматически.'}
+                  : currentPodcastError
+                    ? currentPodcastError
+                    : currentPodcastAudioLoading
+                      ? 'Система формирует аудиопересказ по загруженному документу.'
+                      : isPlayerLoading
+                        ? 'Браузер получает поток аудио и подготавливает его к воспроизведению. Это может занять время для больших файлов.'
+                        : 'Вернитесь на главную страницу и загрузите документ. После обработки аудиопересказ появится здесь автоматически.'}
               </p>
 
               <button
