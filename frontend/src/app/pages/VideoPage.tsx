@@ -33,11 +33,11 @@ const DEFAULT_SPEAKER = "xenia";
 const DEFAULT_SUMMARY_TEMPLATE = "summary";
 const DEFAULT_MAX_SENTENCES = 8;
 const SPEAKER_OPTIONS = [
-  "aidar",
-  "baya",
-  "eugene",
-  "kseniya",
-  "xenia",
+  { value: "aidar", label: "Айдар" },
+  { value: "baya", label: "Бая" },
+  { value: "eugene", label: "Евгений" },
+  { value: "kseniya", label: "Ксения" },
+  { value: "xenia", label: "Ксюша" },
 ] as const;
 const SUMMARY_TEMPLATE_OPTIONS = [
   "summary",
@@ -411,7 +411,7 @@ export default function VideoPage() {
 
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Speaker
+                  Голос
                 </label>
                 <select
                   value={speaker}
@@ -421,8 +421,8 @@ export default function VideoPage() {
                   className="w-full px-4 py-3 bg-[#1a1a1a] border border-[#262626] rounded text-white focus:outline-none focus:border-[#84cc16]"
                 >
                   {SPEAKER_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
+                    <option key={option.value} value={option.value}>
+                      {option.label}
                     </option>
                   ))}
                 </select>
@@ -594,8 +594,8 @@ export default function VideoPage() {
           <div className="mt-6 rounded border border-[#262626] bg-[#151515] px-5 py-4 flex items-center gap-3">
             <Loader2 className="w-5 h-5 animate-spin text-[#84cc16]" />
             <span className="text-sm text-gray-300">
-              Внешний сервис генерирует MP4. Это может занять время
-              даже для короткого документа.
+              Генерируем MP4. Это может занять время даже для
+              короткого документа.
             </span>
           </div>
         )}

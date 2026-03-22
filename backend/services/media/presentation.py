@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,7 +15,6 @@ from pptx.util import Pt
 
 from backend.core.config import settings
 from backend.utils.llm import generate_text
-
 
 DEFAULT_PRESENTATION_STYLE: Dict[str, Any] = {
     "title_background": "#10B981",
